@@ -15,6 +15,8 @@ Download the ready-to-flash files from the
 
 - `apex-pro-mini-wl-ab.uf2` is the recommended file for updating a keyboard
   that already runs this firmware.
+- `apex-pro-mini-wl-bootloader-update.uf2` updates `APEXBOOT` itself. It only
+  works after this project's bootloader has been installed and is rarely needed.
 - `apex-pro-mini-wl-ab.zip` contains the project files used for a first
   installation or repair: firmware, bootloader, checksum checker, and programmer
   configurations.

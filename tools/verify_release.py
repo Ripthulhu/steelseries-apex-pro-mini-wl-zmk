@@ -122,6 +122,7 @@ def check_bootloader_recovery_files() -> None:
         "bootloader/apex_pro_mini_wl/ab_promote.c": (
             "ab_promote_info_append",
             "ab_promote_crash_file",
+            '"Bootloader update: supported\\r\\nReset: "',
             "memcpy(newest_crash, record, sizeof(newest_crash))",
         ),
         "bootloader/apex_pro_mini_wl/ab_promote.h": (

@@ -8,6 +8,9 @@ normally installed over SWD. It supports:
   (`APEXBOOT`); copy a `.uf2` onto it and it flashes and reboots.
 - **Serial DFU.** The classic Adafruit/`adafruit-nrfutil` serial protocol works
   too, over a dedicated CDC port.
+- **Bootloader updates.** A board-specific UF2 can update `APEXBOOT` without an
+  SWD programmer. It is staged below the running bootloader and handed to the
+  Nordic MBR only after the complete file passes the bootloader's checks.
 
 The normal SWD installation boots with APPROTECT open (`0xFFFFFFFF`). The stock
 loader refused to launch an application while debug access was open.

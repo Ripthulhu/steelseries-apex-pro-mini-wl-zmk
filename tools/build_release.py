@@ -300,6 +300,9 @@ def clean_release_directory(release_dir: Path) -> None:
             asset = release_dir / f"apex-pro-mini-wl-{profile}{suffix}"
             if asset.exists():
                 asset.unlink()
+    bootloader_update = release_dir / "apex-pro-mini-wl-bootloader-update.uf2"
+    if bootloader_update.exists():
+        bootloader_update.unlink()
     manifest = release_dir / "RELEASE-SHA256SUMS.txt"
     if manifest.exists():
         manifest.unlink()
@@ -314,6 +317,7 @@ def verify_release_directory(release_dir: Path) -> None:
         "apex-pro-mini-wl-ab",
         "apex-pro-mini-wl-ab.uf2",
         "apex-pro-mini-wl-ab.zip",
+        "apex-pro-mini-wl-bootloader-update.uf2",
     }
     actual = {path.name for path in release_dir.iterdir()}
     if actual != expected:
@@ -334,6 +338,7 @@ def package(artifact_dir: Path, boot_build: Path,
         artifact_dir / "apex-zmk-g4b.plain.uf2": bundle / "apex-zmk.uf2",
         artifact_dir / "apex-zmk-g4b.plain.config": bundle / "apex-zmk.config",
         boot_build / "bootloader_mbr.hex": bundle / "bootloader_mbr.hex",
+        boot_build / "bootloader_mbr.uf2": bundle / "apex-bootloader-update.uf2",
     }
     for source, destination in copies.items():
         if not source.is_file():
@@ -386,6 +391,9 @@ def package(artifact_dir: Path, boot_build: Path,
     (bundle / "README.txt").write_text(
         "First-generation SteelSeries Apex Pro Mini Wireless - ZMK firmware\n\n"
         "For a normal update, copy apex-zmk.uf2 to the APEXBOOT drive.\n"
+        "apex-bootloader-update.uf2 updates APEXBOOT itself. Most users do not\n"
+        "need it. Use it only after APEXBOOT is already installed, then install\n"
+        "apex-zmk.uf2 from the same release.\n"
         "apex-zmk.config records the exact options used for this build.\n"
         "KEYMAP.svg shows the default and Fn-layer bindings.\n"
         "For a first installation or repair, follow the current instructions at:\n"
@@ -406,11 +414,14 @@ def package(artifact_dir: Path, boot_build: Path,
     run([python, bundle / "verify_bundle.py", bundle])
     update = bundle.parent / f"{bundle.name}.uf2"
     shutil.copy2(bundle / "apex-zmk.uf2", update)
+    bootloader_update = bundle.parent / "apex-pro-mini-wl-bootloader-update.uf2"
+    shutil.copy2(bundle / "apex-bootloader-update.uf2", bootloader_update)
     archive = archive_bundle(bundle)
     print(f"Release bundle: {bundle}")
     print(f"Ready-to-flash update: {update}")
+    print(f"Bootloader update: {bootloader_update}")
     print(f"Complete bundle: {archive}")
-    return bundle, [update, archive]
+    return bundle, [update, bootloader_update, archive]
 
 
 def parse_args() -> argparse.Namespace:
@@ -472,6 +483,9 @@ def main() -> int:
         print("A/B release firmware built and verified. Nothing was flashed.")
         return 0
     boot_build = prepare_bootloader(work_root, cmake, ninja, python, sdk)
+    run([python, ROOT / "tools" / "verify_bootloader_update.py",
+         boot_build / "bootloader_mbr.uf2",
+         artifact_dir / "apex-zmk-g4b.plain.uf2"])
     run([python, ROOT / "tools" / "verify_release.py", "--work-root", work_root])
     release_dir = work_root / "release"
     clean_release_directory(release_dir)

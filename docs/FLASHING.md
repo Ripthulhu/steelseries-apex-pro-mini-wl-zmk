@@ -22,8 +22,8 @@ like a normal file.
    ZIP, copy its `apex-zmk.uf2` file.
 5. Wait while the drive disconnects and the keyboard restarts.
 
-Do not repeat the first-install erase for an ordinary update. The update file
-cannot overwrite the bootloader.
+Do not repeat the first-install erase for an ordinary update. The normal
+application UF2 cannot overwrite the bootloader.
 
 If `APEXBOOT` does not appear, check that the cable carries data, reconnect the
 keyboard, and try the key combination again.
@@ -31,6 +31,25 @@ keyboard, and try the key combination again.
 The drive also has two small diagnostic files. `INFO_UF2.TXT` shows why the
 keyboard reset and whether A/B recovery is armed. `CRASH.BIN` contains the most
 recent saved crash, when one exists. Neither file is needed for an update.
+
+## Updating APEXBOOT
+
+Most releases do not require a bootloader update. When one does, download
+`apex-pro-mini-wl-bootloader-update.uf2` from that release. This file is only
+for a first-generation Apex Pro Mini Wireless that already has this project's
+`APEXBOOT` bootloader. It is not a way to install the project on a stock
+keyboard.
+
+1. Open `APEXBOOT` with `Fn` + `Right Ctrl` + `Esc`.
+2. Copy `apex-pro-mini-wl-bootloader-update.uf2` to the drive and wait for the
+   keyboard to restart.
+3. Open `APEXBOOT` again and install `apex-pro-mini-wl-ab.uf2` from the same
+   release.
+
+The new bootloader is received in unused space above the application. It is not
+copied over the running bootloader until every UF2 block has arrived and its
+board and layout data have been checked. The release build also refuses to
+ship an application that reaches into this staging space.
 
 ## Other ways to open update mode
 

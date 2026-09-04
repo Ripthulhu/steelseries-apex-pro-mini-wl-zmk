@@ -27,6 +27,12 @@ The 8 KiB gap below the bootloader is unused. Extending the application into it
 would also require expanding the external A/B slot and updating the layout
 checks in both the application and bootloader.
 
+`APEXBOOT` receives a bootloader update at `0x63000..0x6D000` before asking the
+Nordic MBR to replace the running copy. The release builder checks that the
+application ends below `0x63000`. Normal application UF2 writes are accepted up
+to `0x6D000`; the rest of the 452 KiB application partition is available to SWD
+and A/B recovery but not to the current UF2 writer.
+
 UICR boot addresses, reset-pin assignment, and debug settings are documented in
 [BOOTLOADER.md](BOOTLOADER.md).
 

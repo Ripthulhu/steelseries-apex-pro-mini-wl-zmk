@@ -403,7 +403,7 @@ void ab_promote_info_append(char *text, uint32_t capacity)
     };
     uint32_t pos = (uint32_t)strlen(text);
 
-    text_str(text, capacity, &pos, "Reset: ");
+    text_str(text, capacity, &pos, "Bootloader update: supported\r\nReset: ");
     text_hex32(text, capacity, &pos, boot_status.resetreas);
     text_str(text, capacity, &pos, "\r\nA/B: ");
     text_str(text, capacity, &pos, action_names[boot_status.action]);

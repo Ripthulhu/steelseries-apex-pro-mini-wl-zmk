@@ -42,6 +42,7 @@ jobs:
           cd "$RELEASE_DIR"
           sha256sum --check RELEASE-SHA256SUMS.txt
           test -s apex-pro-mini-wl-ab.uf2
+          test -s apex-pro-mini-wl-bootloader-update.uf2
           test -s apex-pro-mini-wl-ab.zip
           test -s RELEASE-SHA256SUMS.txt
 
@@ -52,6 +53,7 @@ jobs:
         run: |
           assets=(
             "$RELEASE_DIR/apex-pro-mini-wl-ab.uf2"
+            "$RELEASE_DIR/apex-pro-mini-wl-bootloader-update.uf2"
             "$RELEASE_DIR/apex-pro-mini-wl-ab.zip"
             "$RELEASE_DIR/RELEASE-SHA256SUMS.txt"
           )

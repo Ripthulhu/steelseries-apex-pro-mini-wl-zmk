@@ -65,9 +65,11 @@ The default build includes automatic recovery. It builds the application and
 bootloader, checks their memory layout, and writes these release files:
 
 - `../work/release/apex-pro-mini-wl-ab.uf2` — ready for a normal update;
+- `../work/release/apex-pro-mini-wl-bootloader-update.uf2` — updates an
+  already-installed `APEXBOOT` bootloader;
 - `../work/release/apex-pro-mini-wl-ab.zip` — the complete first-install and
   repair bundle; and
-- `../work/release/RELEASE-SHA256SUMS.txt` — hashes for both downloads.
+- `../work/release/RELEASE-SHA256SUMS.txt` — hashes for the release downloads.
 
 The ZIP is also left unpacked at `../work/release/apex-pro-mini-wl-ab`.
 
@@ -77,6 +79,7 @@ That directory contains:
 apex-zmk.hex
 apex-zmk.uf2
 apex-zmk.config
+apex-bootloader-update.uf2
 bootloader_mbr.hex
 uicr-open.bin
 SHA256SUMS.txt
@@ -94,6 +97,8 @@ It also contains the project and third-party licence texts.
 The files have different jobs:
 
 - `apex-zmk.uf2` is the file copied to the `APEXBOOT` drive for normal updates.
+- `apex-bootloader-update.uf2` updates `APEXBOOT` itself. It is not used for a
+  first installation.
 - `apex-zmk.config` records the final Kconfig values used by the compiler.
 - `apex-zmk.hex`, `bootloader_mbr.hex`, and `uicr-open.bin` are used together
   for the first installation or a repair with a hardware programmer.
