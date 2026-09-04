@@ -1,0 +1,28 @@
+diff --git a/src/usb/uf2/ghostfat.c b/src/usb/uf2/ghostfat.c
+index 97753ef..1d0f773 100644
+--- a/src/usb/uf2/ghostfat.c
++++ b/src/usb/uf2/ghostfat.c
+@@ -438,8 +438,21 @@ int write_block (uint32_t block_no, uint8_t *data, WriteState *state)
+        */
+       if ( in_app_space(bl->targetAddr) )
+       {
+-        PRINTF("Write addr = 0x%08lX, block = %ld (%ld of %ld)\r\n", bl->targetAddr, bl->blockNo, state->numWritten, bl->numBlocks);
+-        flash_nrf5x_write(bl->targetAddr, bl->data, bl->payloadSize, true);
++#ifdef APEX_APP_FLASH_START
++        /* Anti-brick: in_app_space() begins at the MBR boundary, but a board
++         * may place its application later. Silently skip blocks below that
++         * board-defined floor. Bootloader self-update families use separate
++         * switch cases and are unaffected. */
++        if ( bl->targetAddr < APEX_APP_FLASH_START )
++        {
++          PRINTF("APEX: skip UF2 write below app start (0x%08lX)\r\n", bl->targetAddr);
++        }
++        else
++#endif
++        {
++          PRINTF("Write addr = 0x%08lX, block = %ld (%ld of %ld)\r\n", bl->targetAddr, bl->blockNo, state->numWritten, bl->numBlocks);
++          flash_nrf5x_write(bl->targetAddr, bl->data, bl->payloadSize, true);
++        }
+       }else if ( bl->targetAddr < USER_FLASH_START )
+       {
+         // do nothing if writing to MBR, occurs when SD hex is included

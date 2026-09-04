@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: MIT
+
+description: |
+  Kscan bridge for the G4B STM32 SPIM3 link gate.
+
+  The node deliberately carries no SPI phandle, no cs-gpios and no pinctrl. The
+  link is driven by direct register access rather than the Zephyr SPI driver,
+  because CONFIG_PINCTRL would apply pin configuration at init priority 50 -
+  driving SCK/MOSI/MISO roughly two seconds before the control sequence runs,
+  while the STM32 enable lines are still undriven. There is also no chip select
+  on this link at all.
+
+compatible: "steelseries,apex-g4b-spim-kscan"
+
+include: kscan.yaml
+
+properties:
+  rows:
+    type: int
+    required: true
+    const: 5
+    description: Matrix rows in the 60% ANSI transform.
+  columns:
+    type: int
+    required: true
+    const: 14
+    description: Matrix columns in the 60% ANSI transform.

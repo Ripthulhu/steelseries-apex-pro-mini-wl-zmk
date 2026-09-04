@@ -1,0 +1,20 @@
+description: |
+  Safe bring-up keyboard scanner for the stock STM32G071 Hall controller in
+  the SteelSeries Apex Pro Mini Wireless. The initial driver does not access
+  hardware. A future transport driver can feed decoded 70-bit key maps into
+  apex_stm32_kscan_ingest_bitmap().
+
+compatible: "steelseries,apex-stm32-kscan"
+
+include: kscan.yaml
+
+properties:
+  rows:
+    type: int
+    required: true
+    const: 5
+
+  columns:
+    type: int
+    required: true
+    const: 14

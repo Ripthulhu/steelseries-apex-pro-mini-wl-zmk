@@ -1,0 +1,64 @@
+/* SPDX-License-Identifier: MIT */
+
+/delete-node/ &storage_partition;
+
+/ {
+    model = "SteelSeries Apex Pro Mini Wireless G4B";
+};
+
+&kscan0 {
+    compatible = "steelseries,apex-g4b-spim-kscan";
+    status = "okay";
+    rows = <5>;
+    columns = <14>;
+};
+
+/*
+ * behavior_reset.c is compiled unconditionally but its body is guarded by
+ * DT_HAS_COMPAT_STATUS_OKAY(zmk_behavior_reset). Disabling both reset nodes
+ * drops the only sys_reboot() reference, so CONFIG_REBOOT stays n instead of
+ * being relaxed to satisfy the linker. Nothing in the keymap binds them.
+ *
+ * The labels are not defined yet at this point — ZMK appends the keymap (which
+ * includes behaviors.dtsi) after this overlay — so the nodes are addressed by
+ * path. The later include adds properties but never a status, so these win.
+ */
+/ {
+    behaviors {
+        sysreset {
+            status = "disabled";
+        };
+
+        bootload {
+            status = "disabled";
+        };
+    };
+};
+
+&spi3 {
+    status = "disabled";
+};
+
+&usbd {
+    status = "disabled";
+};
+
+&code_partition {
+    reg = <0x0001C000 0x00030000>;
+};
+
+&flash0 {
+    partitions {
+        rr7_wrapper_partition: partition@4c000 {
+            label = "rr7-wrapper";
+            reg = <0x0004C000 0x00001000>;
+            read-only;
+        };
+
+        g4a_cookie_partition: partition@4d000 {
+            label = "g4a-cookie";
+            reg = <0x0004D000 0x00001000>;
+        };
+    };
+};
+

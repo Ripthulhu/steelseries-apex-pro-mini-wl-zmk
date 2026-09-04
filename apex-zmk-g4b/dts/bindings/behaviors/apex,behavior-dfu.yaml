@@ -1,0 +1,10 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: MIT
+
+description: |
+  Reboots into the Adafruit_nRF52_Bootloader (UF2/serial DFU) by writing the
+  UF2 DFU magic to GPREGRET and resetting. Bound via a combo to Fn+Esc+RCtrl.
+
+compatible: "apex,behavior-dfu"
+
+include: zero_param.yaml

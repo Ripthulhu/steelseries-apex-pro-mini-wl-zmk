@@ -1,0 +1,38 @@
+/* SPDX-License-Identifier: MIT */
+
+/dts-v1/;
+#include <nordic/nrf52833_qiaa.dtsi>
+#include "apex_pro_mini_wl-pinctrl.dtsi"
+
+/ {
+    model = "SteelSeries Apex Pro Mini Wireless Zephyr Canary";
+    compatible = "steelseries,apex-pro-mini-wl-canary";
+
+    chosen {
+        zephyr,sram = &sram_apex;
+        zephyr,flash = &flash0;
+        zephyr,code-partition = &code_partition;
+    };
+
+    sram_apex: memory@20003000 {
+        compatible = "mmio-sram";
+        reg = <0x20003000 0x0001D000>;
+    };
+};
+
+zephyr_udc0: &usbd {
+    status = "okay";
+};
+
+&flash0 {
+    partitions {
+        compatible = "fixed-partitions";
+        #address-cells = <1>;
+        #size-cells = <1>;
+
+        code_partition: partition@1c000 {
+            label = "image-0";
+            reg = <0x0001C000 0x00045000>;
+        };
+    };
+};

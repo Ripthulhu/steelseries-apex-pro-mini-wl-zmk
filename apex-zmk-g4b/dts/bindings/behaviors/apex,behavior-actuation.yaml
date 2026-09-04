@@ -1,0 +1,17 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: MIT
+
+description: |
+  Actuation point and rapid trigger, adjustable from the keymap.
+
+  These sit under legends the keycaps already carry - I and O for actuation up
+  and down, T for rapid trigger - which were inert while both settings were
+  build-time constants.
+
+  The parameter selects the action: 0 deeper, 1 shallower, 2 rapid trigger up,
+  3 rapid trigger down, 4 rapid trigger toggle. Use the ACT_* macros from
+  dt-bindings/apex_actuation.h rather than the bare numbers.
+
+compatible: "apex,behavior-actuation"
+
+include: one_param.yaml

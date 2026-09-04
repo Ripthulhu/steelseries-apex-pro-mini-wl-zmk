@@ -1,0 +1,48 @@
+diff --git a/zephyr/drivers/usb/common/nrf_usbd_common/nrf_usbd_common.c b/zephyr/drivers/usb/common/nrf_usbd_common/nrf_usbd_common.c
+index 9e5024837..328185b96 100644
+--- a/zephyr/drivers/usb/common/nrf_usbd_common/nrf_usbd_common.c
++++ b/zephyr/drivers/usb/common/nrf_usbd_common/nrf_usbd_common.c
+@@ -1267,6 +1267,18 @@ void nrf_usbd_common_start(bool enable_sof)
+ 	/* Enable interrupt globally */
+ 	irq_enable(USBD_IRQn);
+ 
++	/* VUSB33 must be ready before the D+ pull-up is asserted. If a
++	 * bootloader hands over while the supply is still settling, the
++	 * register write succeeds but the host never sees the device attach.
++	 * Keep the wait bounded so a failed regulator cannot block this work.
++	 */
++	for (int i = 0; i < 100000; i++) {
++		if (NRF_POWER->USBREGSTATUS & POWER_USBREGSTATUS_OUTPUTRDY_Msk) {
++			break;
++		}
++		k_busy_wait(1);
++	}
++
+ 	/* Enable pullups */
+ 	NRF_USBD->USBPULLUP = 1;
+ }
+diff --git a/zephyr/drivers/usb/device/usb_dc_nrfx.c b/zephyr/drivers/usb/device/usb_dc_nrfx.c
+index d7e561671..bcecf4687 100644
+--- a/zephyr/drivers/usb/device/usb_dc_nrfx.c
++++ b/zephyr/drivers/usb/device/usb_dc_nrfx.c
+@@ -1304,12 +1304,20 @@
+ 		 * will not receive this event and it needs to be generated
+ 		 * again here.
+ 		 */
+ 		usb_dc_power_event_handler(NRFX_POWER_USB_EVT_DETECTED);
+ 	}
+ 
++	/* A USB bootloader can consume USBPWRRDY before this driver starts.
++	 * Recreate the missed edge from the current regulator state so the
++	 * application completes its normal attach sequence.
++	 */
++	if (nrfx_power_usbstatus_get() == NRFX_POWER_USB_STATE_READY) {
++		usb_dc_power_event_handler(NRFX_POWER_USB_EVT_READY);
++	}
++
+ 	return ret;
+ }
+ 
+ int usb_dc_detach(void)
+ {
+ 	struct nrf_usbd_ctx *ctx = get_usbd_ctx();

@@ -1,0 +1,24 @@
+diff --git a/src/boards/boards.c b/src/boards/boards.c
+index c02a278..0465c92 100644
+--- a/src/boards/boards.c
++++ b/src/boards/boards.c
+@@ -466,6 +466,19 @@ void led_state(uint32_t state) {
+     final_color = (uint8_t*) &rgb_color;
+   }
+ 
++#ifdef BOARD_HAS_RGB_DFU
++  /* Apex: mirror the DFU state onto the per-key RGB matrix (the only visible LED
++   * on this board). Restricted to the states that mean "actually in DFU" so a
++   * normal boot - which fires STATE_BOOTLOADER_STARTED then jumps to the app -
++   * stays dark. green = DFU drive mounted, red = writing / unmounted. */
++  if ( state == STATE_USB_MOUNTED || state == STATE_WRITING_STARTED ||
++       state == STATE_WRITING_FINISHED || state == STATE_USB_UNMOUNTED )
++  {
++    extern void board_rgb_dfu(uint32_t rgb);
++    board_rgb_dfu( (temp_color != 0) ? temp_color : rgb_color );
++  }
++#endif
++
+ #if defined(LED_NEOPIXEL) || defined(LED_RGB_RED_PIN) || defined(LED_APA102_CLK)
+   if (final_color != NULL) {
+     neopixel_write(final_color);

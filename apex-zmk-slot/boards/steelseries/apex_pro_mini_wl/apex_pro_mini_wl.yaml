@@ -1,0 +1,11 @@
+identifier: apex_pro_mini_wl
+name: SteelSeries Apex Pro Mini Wireless
+type: mcu
+arch: arm
+ram: 128
+flash: 512
+toolchain:
+  - zephyr
+supported:
+  - usb_device
+  - ble

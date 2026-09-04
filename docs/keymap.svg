@@ -1,0 +1,140 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1360" height="790" viewBox="0 0 1360 790" role="img" aria-labelledby="title desc">
+  <title id="title">First-generation SteelSeries Apex Pro Mini Wireless keymap</title>
+  <desc id="desc">The normal key labels and the actions available while either Fn key is held.</desc>
+  <style>
+    .bg { fill: #171a21; }
+    .panel { fill: #1e232d; stroke: #343c4b; stroke-width: 1.5; }
+    .key { fill: #282e3a; stroke: #414b5e; stroke-width: 1.25; }
+    .base { fill: #aeb8c8; font: 13px "Segoe UI", Arial, sans-serif; }
+    .fn { font: 600 13px "Segoe UI", Arial, sans-serif; }
+    .muted { fill: #667085; font: 12px "Segoe UI", Arial, sans-serif; }
+    .heading { fill: #f4f7fb; font: 700 34px "Segoe UI", Arial, sans-serif; }
+    .intro { fill: #c7cfdb; font: 17px "Segoe UI", Arial, sans-serif; }
+    .small { fill: #9aa6b8; font: 13px "Segoe UI", Arial, sans-serif; }
+    .label { fill: #f4f7fb; font: 700 16px "Segoe UI", Arial, sans-serif; }
+    .note { fill: #b9c3d1; font: 14px "Segoe UI", Arial, sans-serif; }
+    .nav { fill: #56d4e8; }
+    .light { fill: #c786ff; }
+    .switch { fill: #ffc24b; }
+    .bt { fill: #72adff; }
+    .media { fill: #5de0a2; }
+    .system { fill: #ff737d; }
+    .fnkey { fill: #ff9b54; }
+  </style>
+
+  <rect class="bg" width="1360" height="790"/>
+  <text class="heading" x="40" y="50">Keymap</text>
+  <text class="intro" x="40" y="79">Hold either Fn key to use the coloured label. The key in the Caps Lock position is Fn, not Caps Lock.</text>
+  <rect class="panel" x="24" y="96" width="1312" height="422" rx="18"/>
+
+  <!-- Number row -->
+  <g transform="translate(40 112)"><rect class="key" width="82" height="68" rx="8"/><circle class="system" cx="72" cy="10" r="4"/><text class="base" x="10" y="21">Esc</text><text class="fn nav" x="10" y="50">`</text></g>
+  <g transform="translate(130 112)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">1</text><text class="fn nav" x="10" y="50">F1</text></g>
+  <g transform="translate(220 112)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">2</text><text class="fn nav" x="10" y="50">F2</text></g>
+  <g transform="translate(310 112)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">3</text><text class="fn nav" x="10" y="50">F3</text></g>
+  <g transform="translate(400 112)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">4</text><text class="fn nav" x="10" y="50">F4</text></g>
+  <g transform="translate(490 112)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">5</text><text class="fn nav" x="10" y="50">F5</text></g>
+  <g transform="translate(580 112)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">6</text><text class="fn nav" x="10" y="50">F6</text></g>
+  <g transform="translate(670 112)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">7</text><text class="fn nav" x="10" y="50">F7</text></g>
+  <g transform="translate(760 112)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">8</text><text class="fn nav" x="10" y="50">F8</text></g>
+  <g transform="translate(850 112)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">9</text><text class="fn nav" x="10" y="50">F9</text></g>
+  <g transform="translate(940 112)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">0</text><text class="fn nav" x="10" y="50">F10</text></g>
+  <g transform="translate(1030 112)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">−</text><text class="fn nav" x="10" y="50">F11</text></g>
+  <g transform="translate(1120 112)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">=</text><text class="fn nav" x="10" y="50">F12</text></g>
+  <g transform="translate(1210 112)"><rect class="key" width="110" height="68" rx="8"/><text class="base" x="10" y="21">Backspace</text><text class="fn nav" x="10" y="50">Delete</text></g>
+
+  <!-- QWERTY row -->
+  <g transform="translate(40 192)"><rect class="key" width="100" height="68" rx="8"/><text class="base" x="10" y="21">Tab</text><text class="muted" x="10" y="50">unchanged</text></g>
+  <g transform="translate(148 192)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">Q</text><text class="fn switch" x="10" y="50">Reset dist.</text></g>
+  <g transform="translate(238 192)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">W</text><text class="fn nav" x="10" y="50">↑</text></g>
+  <g transform="translate(328 192)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">E</text><text class="fn light" x="10" y="50">RGB on/off</text></g>
+  <g transform="translate(418 192)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">R</text><text class="fn light" x="10" y="50">Prev ZMK FX</text></g>
+  <g transform="translate(508 192)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">T</text><text class="fn switch" x="10" y="50">Rapid trig.</text></g>
+  <g transform="translate(598 192)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">Y</text><text class="fn light" x="10" y="50">Hue −</text></g>
+  <g transform="translate(688 192)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">U</text><text class="fn light" x="10" y="50">Hue +</text></g>
+  <g transform="translate(778 192)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">I</text><text class="fn switch" x="10" y="50">Shallower</text></g>
+  <g transform="translate(868 192)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">O</text><text class="fn switch" x="10" y="50">Deeper</text></g>
+  <g transform="translate(958 192)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">P</text><text class="fn nav" x="10" y="50">Print Scr.</text></g>
+  <g transform="translate(1048 192)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">[</text><text class="fn nav" x="10" y="50">Home</text></g>
+  <g transform="translate(1138 192)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">]</text><text class="fn nav" x="10" y="50">Page Up</text></g>
+  <g transform="translate(1228 192)"><rect class="key" width="92" height="68" rx="8"/><text class="base" x="10" y="21">\</text><text class="fn bt" x="10" y="50">Clear BT</text></g>
+
+  <!-- Home row -->
+  <g transform="translate(40 272)"><rect class="key" width="112" height="68" rx="8"/><text class="base fnkey" x="10" y="21">Fn</text><text class="small" x="10" y="39">Caps position</text><text class="muted" x="10" y="58">hold</text></g>
+  <g transform="translate(160 272)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">A</text><text class="fn nav" x="10" y="50">←</text></g>
+  <g transform="translate(250 272)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">S</text><text class="fn nav" x="10" y="50">↓</text></g>
+  <g transform="translate(340 272)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">D</text><text class="fn nav" x="10" y="50">→</text></g>
+  <g transform="translate(430 272)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">F</text><text class="fn bt" x="10" y="50">BT 1</text></g>
+  <g transform="translate(520 272)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">G</text><text class="fn bt" x="10" y="50">BT 2</text></g>
+  <g transform="translate(610 272)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">H</text><text class="fn bt" x="10" y="50">BT 3</text></g>
+  <g transform="translate(700 272)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">J</text><text class="fn bt" x="10" y="50">BT 4</text></g>
+  <g transform="translate(790 272)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">K</text><text class="fn bt" x="10" y="50">BT 5</text></g>
+  <g transform="translate(880 272)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">L</text><text class="fn nav" x="10" y="50">Insert</text></g>
+  <g transform="translate(970 272)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">;</text><text class="fn nav" x="10" y="50">End</text></g>
+  <g transform="translate(1060 272)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">'</text><text class="fn nav" x="10" y="50">Page Down</text></g>
+  <g transform="translate(1150 272)"><rect class="key" width="170" height="68" rx="8"/><text class="base" x="10" y="21">Enter</text><text class="muted" x="10" y="50">unchanged</text></g>
+
+  <!-- Bottom letter row -->
+  <g transform="translate(40 352)"><rect class="key" width="148" height="68" rx="8"/><text class="base" x="10" y="21">Left Shift</text><text class="muted" x="10" y="50">unchanged</text></g>
+  <g transform="translate(196 352)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">Z</text><text class="fn switch" x="10" y="50">Gamepad</text></g>
+  <g transform="translate(286 352)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">X</text><text class="fn light" x="10" y="50">Custom FX</text></g>
+  <g transform="translate(376 352)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">C</text><text class="fn light" x="10" y="50">Bright. −</text></g>
+  <g transform="translate(466 352)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">V</text><text class="fn light" x="10" y="50">Bright. +</text></g>
+  <g transform="translate(556 352)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">B</text><text class="fn media" x="10" y="50">Volume −</text></g>
+  <g transform="translate(646 352)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">N</text><text class="fn media" x="10" y="50">Volume +</text></g>
+  <g transform="translate(736 352)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">M</text><text class="fn media" x="10" y="50">Mute</text></g>
+  <g transform="translate(826 352)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">,</text><text class="fn media" x="10" y="50">Previous</text></g>
+  <g transform="translate(916 352)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">.</text><text class="fn media" x="10" y="50">Next</text></g>
+  <g transform="translate(1006 352)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">/</text><text class="fn media" x="10" y="50">Play/pause</text></g>
+  <g transform="translate(1096 352)"><rect class="key" width="224" height="68" rx="8"/><text class="base" x="10" y="21">Right Shift</text><text class="muted" x="10" y="50">unchanged</text></g>
+
+  <!-- Modifier row -->
+  <g transform="translate(40 432)"><rect class="key" width="112" height="68" rx="8"/><text class="base" x="10" y="21">Ctrl</text><text class="muted" x="10" y="50">unchanged</text></g>
+  <g transform="translate(160 432)"><rect class="key" width="112" height="68" rx="8"/><text class="base" x="10" y="21">Win</text><text class="muted" x="10" y="50">unchanged</text></g>
+  <g transform="translate(280 432)"><rect class="key" width="112" height="68" rx="8"/><text class="base" x="10" y="21">Alt</text><text class="muted" x="10" y="50">unchanged</text></g>
+  <g transform="translate(400 432)"><rect class="key" width="480" height="68" rx="8"/><text class="base" x="240" y="38" text-anchor="middle">Space</text></g>
+  <g transform="translate(888 432)"><rect class="key" width="112" height="68" rx="8"/><text class="base" x="10" y="21">Right Alt</text><text class="muted" x="10" y="50">unchanged</text></g>
+  <g transform="translate(1008 432)"><rect class="key" width="112" height="68" rx="8"/><text class="base" x="10" y="21">Win</text><text class="muted" x="10" y="50">unchanged</text></g>
+  <g transform="translate(1128 432)"><rect class="key" width="82" height="68" rx="8"/><text class="base fnkey" x="10" y="21">Fn</text><text class="muted" x="10" y="50">hold</text></g>
+  <g transform="translate(1218 432)"><rect class="key" width="102" height="68" rx="8"/><circle class="system" cx="92" cy="10" r="4"/><text class="base" x="10" y="21">Right Ctrl</text><text class="muted" x="10" y="50">unchanged</text></g>
+
+  <!-- Legend -->
+  <circle class="bt" cx="48" cy="548" r="5"/><text class="small" x="60" y="553">Bluetooth</text>
+  <circle class="light" cx="170" cy="548" r="5"/><text class="small" x="182" y="553">Lighting</text>
+  <circle class="switch" cx="270" cy="548" r="5"/><text class="small" x="282" y="553">Hall settings</text>
+  <circle class="nav" cx="404" cy="548" r="5"/><text class="small" x="416" y="553">Navigation</text>
+  <circle class="media" cx="520" cy="548" r="5"/><text class="small" x="532" y="553">Media</text>
+  <circle class="system" cx="600" cy="548" r="5"/><text class="small" x="612" y="553">System</text>
+
+  <!-- Notes -->
+  <g transform="translate(24 576)">
+    <rect class="panel" width="312" height="174" rx="14"/>
+    <text class="label" x="18" y="32">Fn keys</text>
+    <text class="note" x="18" y="62">Use either Fn key for the coloured</text>
+    <text class="note" x="18" y="84">actions. The left one occupies the</text>
+    <text class="note" x="18" y="106">Caps Lock position.</text>
+    <text class="note" x="18" y="140">Caps Lock is not assigned.</text>
+  </g>
+  <g transform="translate(348 576)">
+    <rect class="panel" width="312" height="174" rx="14"/>
+    <text class="label" x="18" y="32">Hall settings</text>
+    <text class="note" x="18" y="62">I / O: shallower / deeper actuation</text>
+    <text class="note" x="18" y="86">T: rapid trigger on or off</text>
+    <text class="note" x="18" y="110">Q: cycle rapid-trigger reset distance</text>
+    <text class="note" x="18" y="134">Z: USB analog gamepad on or off</text>
+  </g>
+  <g transform="translate(672 576)">
+    <rect class="panel" width="312" height="174" rx="14"/>
+    <text class="label" x="18" y="32">Bluetooth</text>
+    <text class="note" x="18" y="62">F through K: choose profile 1–5</text>
+    <text class="note" x="18" y="86">Backslash: clear the current pairing</text>
+  </g>
+  <g transform="translate(996 576)">
+    <rect class="panel" width="340" height="174" rx="14"/>
+    <text class="label" x="18" y="32">Open APEXBOOT</text>
+    <text class="note" x="18" y="62">Hold Fn, then press Esc and Right Ctrl</text>
+    <text class="note" x="18" y="86">together. Copy the firmware UF2 to the</text>
+    <text class="note" x="18" y="110">drive that appears.</text>
+    <text class="note" x="18" y="144">Fn + Esc by itself types a grave accent.</text>
+  </g>
+</svg>

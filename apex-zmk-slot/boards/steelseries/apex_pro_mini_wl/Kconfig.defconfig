@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: MIT
+
+if BOARD_APEX_PRO_MINI_WL
+
+config ZMK_KEYBOARD_NAME
+    string
+    default "Apex Pro Mini WL"
+
+if USB_DEVICE_STACK
+
+config USB_NRFX
+    default y
+
+endif
+
+config BT_CTLR
+    default BT
+
+endif

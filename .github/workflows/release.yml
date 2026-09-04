@@ -1,0 +1,65 @@
+name: Build release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and publish firmware
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    permissions:
+      contents: write
+    env:
+      WORK_ROOT: /tmp/apex-zmk-work
+      RELEASE_DIR: /tmp/apex-zmk-work/release
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Set up locked build dependencies
+        run: python tools/setup_workspace.py --work-root "$WORK_ROOT"
+
+      - name: Build A/B firmware
+        run: python tools/build_release.py --work-root "$WORK_ROOT"
+
+      - name: Verify release files
+        shell: bash
+        run: |
+          cd "$RELEASE_DIR"
+          sha256sum --check RELEASE-SHA256SUMS.txt
+          test -s apex-pro-mini-wl-ab.uf2
+          test -s apex-pro-mini-wl-ab.zip
+          test -s RELEASE-SHA256SUMS.txt
+
+      - name: Publish GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          assets=(
+            "$RELEASE_DIR/apex-pro-mini-wl-ab.uf2"
+            "$RELEASE_DIR/apex-pro-mini-wl-ab.zip"
+            "$RELEASE_DIR/RELEASE-SHA256SUMS.txt"
+          )
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "${assets[@]}" \
+              --verify-tag \
+              --generate-notes \
+              --title "$GITHUB_REF_NAME"
+          fi

@@ -1,0 +1,32 @@
+diff --git a/cmake/toolchain/arm_gcc.cmake b/cmake/toolchain/arm_gcc.cmake
+index d11826c..898428d 100644
+--- a/cmake/toolchain/arm_gcc.cmake
++++ b/cmake/toolchain/arm_gcc.cmake
+@@ -1,8 +1,24 @@
+ set(CMAKE_SYSTEM_NAME Generic)
+ 
+-set(CMAKE_C_COMPILER "arm-none-eabi-gcc")
+-set(CMAKE_CXX_COMPILER "arm-none-eabi-g++")
+-set(CMAKE_ASM_COMPILER "arm-none-eabi-gcc")
++if(NOT DEFINED ZEPHYR_SDK_INSTALL_DIR)
++  if(DEFINED ENV{ZEPHYR_SDK_INSTALL_DIR})
++    set(ZEPHYR_SDK_INSTALL_DIR "$ENV{ZEPHYR_SDK_INSTALL_DIR}")
++  else()
++    message(FATAL_ERROR "Set ZEPHYR_SDK_INSTALL_DIR to a Zephyr SDK installation")
++  endif()
++endif()
++
++set(ZEPHYR_ARM_BIN "${ZEPHYR_SDK_INSTALL_DIR}/arm-zephyr-eabi/bin")
++if(WIN32)
++  set(APEX_TOOL_SUFFIX ".exe")
++else()
++  set(APEX_TOOL_SUFFIX "")
++endif()
++set(CMAKE_C_COMPILER   "${ZEPHYR_ARM_BIN}/arm-zephyr-eabi-gcc${APEX_TOOL_SUFFIX}")
++set(CMAKE_CXX_COMPILER "${ZEPHYR_ARM_BIN}/arm-zephyr-eabi-g++${APEX_TOOL_SUFFIX}")
++set(CMAKE_ASM_COMPILER "${ZEPHYR_ARM_BIN}/arm-zephyr-eabi-gcc${APEX_TOOL_SUFFIX}")
++set(CMAKE_OBJCOPY      "${ZEPHYR_ARM_BIN}/arm-zephyr-eabi-objcopy${APEX_TOOL_SUFFIX}" CACHE FILEPATH "objcopy")
++set(CMAKE_SIZE         "${ZEPHYR_ARM_BIN}/arm-zephyr-eabi-size${APEX_TOOL_SUFFIX}" CACHE FILEPATH "size")
+ set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+ 
+ set_property(GLOBAL PROPERTY TARGET_SUPPORTS_SHARED_LIBS FALSE)

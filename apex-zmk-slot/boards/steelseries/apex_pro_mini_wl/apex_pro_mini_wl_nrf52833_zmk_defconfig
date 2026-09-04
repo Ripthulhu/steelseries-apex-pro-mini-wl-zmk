@@ -1,0 +1,40 @@
+# SPDX-License-Identifier: MIT
+
+# This board uses a custom flash layout and direct-register peripheral drivers.
+# Application configurations may override the generic GPIO and pinctrl defaults.
+CONFIG_ARM_MPU=n
+CONFIG_HW_STACK_PROTECTION=n
+CONFIG_PINCTRL=y
+CONFIG_GPIO=y
+
+# Full 128 KiB SRAM (base 0x20000000 in devicetree). The old 116 KiB left the
+# s140 SoftDevice's 12 KiB RAM reservation at the bottom; the SD is now removed.
+CONFIG_SRAM_SIZE=128
+
+# Use the internal low-frequency RC oscillator until the module crystal wiring
+# is confirmed independently.
+CONFIG_CLOCK_CONTROL_NRF_K32SRC_RC=y
+CONFIG_CLOCK_CONTROL_NRF_K32SRC_250PPM=y
+
+CONFIG_USE_DT_CODE_PARTITION=y
+CONFIG_FLASH=y
+CONFIG_FLASH_PAGE_LAYOUT=y
+CONFIG_FLASH_MAP=y
+CONFIG_NVS=y
+CONFIG_SETTINGS_NVS=y
+
+# Keep the board default small. The main firmware configuration enables USB,
+# battery reporting, Studio, and the board-specific drivers.
+CONFIG_ZMK_USB=n
+CONFIG_ZMK_BLE=y
+CONFIG_ZMK_BATTERY_REPORTING=n
+CONFIG_BT_DEVICE_NAME_MAX=17
+
+# The canary still returns to the preserved SteelSeries bootloader after a
+# bounded window unless a later recovery wrapper explicitly commits success.
+CONFIG_SERIAL=n
+CONFIG_CONSOLE=n
+CONFIG_SHELL=n
+
+CONFIG_BUILD_OUTPUT_BIN=y
+CONFIG_BUILD_OUTPUT_HEX=y

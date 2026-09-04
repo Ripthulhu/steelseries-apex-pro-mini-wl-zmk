@@ -1,0 +1,7 @@
+name: apex-zmk-g4a
+build:
+  cmake: .
+  kconfig: Kconfig
+  settings:
+    dts_root: .
+

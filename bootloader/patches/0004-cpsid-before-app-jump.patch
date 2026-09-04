@@ -1,0 +1,18 @@
+diff --git a/lib/sdk11/components/libraries/bootloader_dfu/bootloader_util.c b/lib/sdk11/components/libraries/bootloader_dfu/bootloader_util.c
+index a1fb9be..10cba05 100644
+--- a/lib/sdk11/components/libraries/bootloader_dfu/bootloader_util.c
++++ b/lib/sdk11/components/libraries/bootloader_dfu/bootloader_util.c
+@@ -95,6 +95,13 @@ static inline void bootloader_util_reset(uint32_t start_addr)
+         "cmp   r5, #0x00\t\n"           // Compare, if 0 then we are in thread mode and can continue to reset handler of bootloader.
+         "bne   isr_abort\t\n"           // If not zero we need to exit current ISR and jump to reset handler of bootloader.
+ 
++        "cpsid i\t\n"                   // APEX: jump to the app with IRQs MASKED. This
++                                        // bootloader runs USB in DFU mode and, with the
++                                        // MBR forwarding IRQs to the app, a still-
++                                        // pending POWER/USBD event would otherwise fire
++                                        // into the app during its early SystemInit -
++                                        // before Zephyr sets VTOR / inits nrfx - and
++                                        // crash. Zephyr re-enables IRQs once it is ready.
+         "mov   lr, r4\t\n"              // Clear the link register and set to ones to ensure no return.
+         "bx    r0\t\n"                  // Branch to reset handler of bootloader.
+ 

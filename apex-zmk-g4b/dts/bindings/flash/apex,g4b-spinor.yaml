@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: MIT
+description: |
+  Apex Pro Mini WL external FM25Q08A SPI-NOR (1 MiB), driven direct-register on
+  SPIM0 with a bit-banged chip select by src/flash_spinor_g4b.c. Exposed as a
+  Zephyr flash device so NVS/settings can live on the freed external chip. Not on
+  a Zephyr SPI bus (which would pull in CONFIG_SPI/GPIO/PINCTRL that the build
+  verifier forbids). Put a fixed-partitions child under it for storage.
+
+compatible: "apex,g4b-spinor"
+
+include: [base.yaml]
+
+properties:
+  reg:
+    required: true
+  erase-block-size:
+    type: int
+    required: true
+    description: Erase sector size in bytes (4096).
+  write-block-size:
+    type: int
+    required: true
+    description: Minimum write size in bytes (1 for SPI-NOR).

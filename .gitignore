@@ -1,0 +1,63 @@
+# Downloaded source trees and toolchains. These are recreated by
+# tools/setup_workspace.py from dependencies.lock.json.
+zmk-upstream/
+toolchain/
+downloads/
+vendor/
+
+# Local SteelSeries firmware, extracted installers, and device backups.
+apex-zmk-g4b/backup/
+*.bin
+*.hex
+*.uf2
+*.pcap
+*.pcapng
+*.dump
+*.zip
+*.tgz
+**/flash-open.bin
+**/uicr-open-backup.bin
+**/backup-manifest.json
+gg-extracted/
+installer-config/
+sse-ghidra/
+sse-ghidra-export.tgz
+*.exe
+*.msi
+*.7z
+
+# Generated build output and caches.
+build/
+*/build/
+**/build/
+__pycache__/
+*.pyc
+.venv/
+.zephyr-sdk/
+*.stdout.log
+*.stderr.log
+/release-assets/
+
+# Python dependencies downloaded by development tools.
+.deps/
+
+# Local session notes and abandoned design drafts.
+/memory/
+/docs/history/
+/docs/planned/
+
+# Downloaded OpenOCD distributions.
+tools/bin/
+tools/lib/
+tools/include/
+tools/share/
+tools/xpack-openocd-0.12.0-7/
+tools/openocd-download/
+tools/openocd-official-download/
+
+# Probe output.
+*.stdout
+
+# Local firmware images and routine captures.
+apex-zmk-g4b/frozen/
+apex-zmk-g4b/live/

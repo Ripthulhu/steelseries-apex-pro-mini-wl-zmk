@@ -1,0 +1,23 @@
+From: Apex ZMK port
+Subject: [PATCH 0007] Read the bootloader version from its own checkout
+
+CMake inherits the caller's working directory. Without an explicit directory,
+the embedded UF2 version can come from an unrelated parent repository and make
+otherwise identical builds differ.
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -322,7 +322,11 @@ endif()
+ #----------------------------------
+ # Get UF2 version from git
+ #----------------------------------
+-execute_process(COMMAND git describe --dirty --always --tags OUTPUT_VARIABLE GIT_VERSION)
++execute_process(
++  COMMAND git describe --dirty --always --tags
++  WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
++  OUTPUT_VARIABLE GIT_VERSION
++)
+ string(STRIP ${GIT_VERSION} GIT_VERSION)
+
+ # Extract semantic version numbers (MAJOR.MINOR.PATCH) from GIT_VERSION.

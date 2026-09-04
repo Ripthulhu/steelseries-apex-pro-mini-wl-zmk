@@ -1,0 +1,125 @@
+/* SPDX-License-Identifier: MIT
+ *
+ * Extended layout: the settings partition, plus the RR7 wrapper moved to the
+ * top of the vendor image.
+ *
+ * Measured in the packaged image, not assumed: 102,396 bytes of pure zero
+ * padding sat at 0x4E000-0x66FFC, above the wrapper, plus an 11,800-byte gap
+ * below it. The payload slot was capped at 0x30000 only because the wrapper was
+ * at 0x4C000. Moving it to 0x65000 raises the slot to 0x49000 - from 196,608 to
+ * 299,008 bytes - which is what makes the USB stack affordable.
+ *
+ * The wrapper address must be consistent: the vendor loader reads the reset
+ * vector from the image start and package_g4b.py writes wrapper_address | 1
+ * there, so failsafe_high.ld, --wrapper-address and this code_partition size
+ * must all agree. verify_g4b.py derives them from FLASH_LOAD_SIZE rather than
+ * hardcoding, so a disagreement fails the build.
+ *
+ * settings_nvs.c resolves its partition from `chosen zephyr,settings-partition`
+ * or, failing that, from a nodelabel literally called `storage_partition`. Ours
+ * is `nvs_storage_partition`, so the chosen entry is required - without it the
+ * build picks up the deleted board partition and fails.
+ *
+ * A separate overlay rather than editing g4b6.overlay, so the stage-6 image
+ * that has already run on hardware stays byte-reproducible.
+ *
+ * Originally: the first NVS partition on this device.
+ *
+ * The board's own storage_partition sits at 0x61000, which is INSIDE the
+ * vendor image region 0x1C000-0x67000. Writing there breaks the image CRC-32
+ * and provokes the vendor loader to repair the slot from its staged copy -
+ * exactly the mechanism that killed the G4A flash cookie. It is deleted here
+ * for that reason, as it is in g4b.overlay.
+ *
+ * The replacement goes above the image, in flash the G4B-4 survey measured
+ * directly rather than guessed at:
+ *
+ *   0x67000-0x78000   vendor content, including self-CRC'd records at
+ *                     0x6D000 and 0x78000 (their CRC-32 is exactly the
+ *                     residue 0x2144DF1C, the signature of a block ending in
+ *                     its own CRC). DO NOT TOUCH.
+ *   0x79000-0x80000   seven contiguous pages reading all 0xFF - erased.
+ *
+ * Placed at 0x7A000 rather than 0x79000, which was the first recommendation,
+ * for two reasons worth stating:
+ *
+ *   - 0x79000 leaves the partition directly adjacent to the vendor record at
+ *     0x78000. NVS stays inside its own bounds, so this only guards against a
+ *     mistake in the partition definition itself - but that is the mistake
+ *     whose consequence is unrecoverable, and a spare page costs 4 KB of 28.
+ *   - The top two pages are left free. Nordic-style bootloaders conventionally
+ *     keep settings and MBR parameters in the last pages of flash. Ours are
+ *     erased today and UICR NRFFW[0]/[1] are unprogrammed, so this vendor is
+ *     evidently not doing that - but it costs nothing to stay out of the way.
+ *
+ * Result: 0x7A000 + 0x4000 = four 4 KB sectors, with a 4 KB guard below and
+ * 8 KB left above.
+ */
+
+/delete-node/ &storage_partition;
+
+/ {
+    model = "SteelSeries Apex Pro Mini Wireless G4B";
+
+    chosen {
+        zephyr,settings-partition = &nvs_storage_partition;
+    };
+};
+
+&kscan0 {
+    compatible = "steelseries,apex-g4b-spim-kscan";
+    status = "okay";
+    rows = <5>;
+    columns = <14>;
+};
+
+/ {
+    behaviors {
+        sysreset {
+            status = "disabled";
+        };
+
+        bootload {
+            status = "disabled";
+        };
+    };
+};
+
+&spi3 {
+    status = "disabled";
+};
+
+&usbd {
+    status = "disabled";
+};
+
+&code_partition {
+    reg = <0x0001C000 0x00049000>;
+};
+
+&flash0 {
+    partitions {
+        rr7_wrapper_partition: partition@65000 {
+            label = "rr7-wrapper";
+            reg = <0x00065000 0x00001000>;
+            read-only;
+        };
+
+        /* Retired one-shot page, kept reserved so nothing else claims it. With
+         * the wrapper high this is the last page of the image and holds the
+         * CRC-32 trailer at 0x66FFC.
+         */
+        g4a_cookie_partition: partition@66000 {
+            label = "g4a-cookie";
+            reg = <0x00066000 0x00001000>;
+        };
+
+        /* Measured erased by G4B-4. Outside the CRC-covered image, so writing
+         * here cannot provoke the slot repair.
+         */
+        nvs_storage_partition: partition@7a000 {
+            label = "storage";
+            reg = <0x0007A000 0x00004000>;
+        };
+    };
+};

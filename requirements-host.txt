@@ -1,0 +1,2 @@
+# Optional host-side USB tools. Firmware builds do not require this package.
+hidapi>=0.14,<1

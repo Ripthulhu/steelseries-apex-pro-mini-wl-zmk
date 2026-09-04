@@ -1,0 +1,9 @@
+board:
+  name: apex_pro_mini_wl
+  full_name: SteelSeries Apex Pro Mini Wireless
+  vendor: steelseries
+  socs:
+    - name: nrf52833
+      variants:
+        - name: zmk
+        - name: canary

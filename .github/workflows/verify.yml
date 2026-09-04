@@ -1,0 +1,31 @@
+name: Verify
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  source:
+    name: Source checks (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+      - name: Verify repository
+        run: python tools/verify_release.py
+      - name: Check portable commands
+        run: |
+          python tools/setup_workspace.py --help
+          python tools/build_release.py --help
+          python apex-zmk-g4b/build_g4b.py --help
+          python installer/build_migration.py --help
+          python apex-zmk-slot/scripts/build.py --help

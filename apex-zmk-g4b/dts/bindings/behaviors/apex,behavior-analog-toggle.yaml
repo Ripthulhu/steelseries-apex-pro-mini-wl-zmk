@@ -1,0 +1,13 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: MIT
+
+description: |
+  Toggles the analog gamepad axis on and off from the keymap.
+
+  The axis is off at boot because it is not universally welcome - a game that
+  grabs the first controller it enumerates will ignore the keyboard - so it is
+  opt-in per session rather than always live.
+
+compatible: "apex,behavior-analog-toggle"
+
+include: zero_param.yaml

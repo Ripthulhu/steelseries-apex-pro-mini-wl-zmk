@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: MIT
+
+config BOARD_APEX_PRO_MINI_WL
+    select SOC_NRF52833_QIAA
+    select ZMK_BOARD_COMPAT if BOARD_APEX_PRO_MINI_WL_NRF52833_ZMK

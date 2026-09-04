@@ -1,0 +1,1048 @@
+# SPDX-License-Identifier: MIT
+
+DT_COMPAT_STEELSERIES_APEX_G4B_SPIM_KSCAN := steelseries,apex-g4b-spim-kscan
+
+config APEX_G4B_SPIM_KSCAN
+    bool
+    default $(dt_compat_enabled,$(DT_COMPAT_STEELSERIES_APEX_G4B_SPIM_KSCAN))
+    depends on KSCAN
+    help
+      Kscan bridge for the STM32 scanner on SPIM3. This option is enabled by
+      the matching devicetree node.
+
+if APEX_G4B_SPIM_KSCAN
+
+config APEX_G4B_STAGE
+    int "Scanner diagnostic stage"
+    range 0 7
+    default 0
+    help
+      Selects one of the scanner bring-up and diagnostic paths at build time.
+      The verifier checks the selected stage in the finished image. Release
+      firmware uses stage 3.
+
+        0  OBSERVE       Configure and sample the control pins without enabling
+                         SPIM3 or putting data on the scanner link.
+        1  PROBE         Send the read-only 0x90 and 0xA0 queries.
+        2  REPLAY        Send the captured 59-frame scanner configuration after
+                         a flash; later diagnostic launches only query state.
+        3  KEYBOARD      Replay the scanner configuration on every boot, then
+                         process 0xA1 key reports continuously.
+        4  FLASH SURVEY  Calculate CRCs for selected internal-flash ranges and
+                         read the relevant UICR words. This stage is read-only.
+        5  FLASH DUMP    Emit a selected internal-flash range and UICR as
+                         CRC-protected 4 KiB chunks. This stage is read-only.
+        6  NVS TEST      Exercise raw NVS persistence in the diagnostic internal
+                         partition at 0x7A000. This is the first writing stage.
+        7  SETTINGS      Exercise Zephyr settings and Bluetooth bond persistence
+                         on the stage-6 partition.
+
+      The verifier restricts stages 4 and 5 to the instruction-cache NVMC
+      access performed by Zephyr's SoC initialization. They do not program or
+      erase flash.
+
+config APEX_G4B_UART_EVIDENCE
+    bool "Emit APXG evidence records on the diagnostic UART"
+    default y
+    help
+      Writes fixed-size records to UARTE0 on P0.10 at 19200 8N1 using direct
+      register access, because CONFIG_SERIAL stays n. This is the only output
+      channel for stage 0, which produces no BLE-visible result.
+
+config APEX_G4B_KSCAN_INGEST
+    bool "Feed captured A1 bitmaps into the ZMK kscan driver"
+    default n
+    help
+      Pass scanner bitmaps to apex_g4b_kscan_ingest_bitmap(), which drives ZMK's
+      kscan callback, event queue, and HID pipeline. Release configurations
+      enable this; individual scanner diagnostics may leave it off.
+
+config APEX_G4B_DEADLINE_MS
+    int "Global deadline for the stage thread, milliseconds"
+    default 12000
+    range 1000 240000
+    help
+      Maximum runtime for finite diagnostic work. When the deadline expires,
+      the stage stops collecting data and emits the record it has. The normal
+      stage-3 keyboard loop is continuous; this value affects its optional
+      boot diagnostic only.
+
+      Wrapper-based diagnostic builds with a bounded watchdog feed must set
+      APEX_G4B_FEED_BUDGET_MS greater than or equal to this value. The poll
+      window uses the Zephyr uptime clock, so the full configured range is safe
+      from the 32-bit CPU cycle-counter wrap.
+
+endif
+
+config APEX_G4B_DUMP_LOADER
+	bool "Stage 5 targets the factory-loader address range"
+	depends on APEX_G4B_STAGE = 5
+	help
+	  Change the read-only stage-5 target from the stock MBR+S113 prefix at
+	  0x00000..0x1C000 to the protected factory-loader range at
+	  0x6E000..0x79000. APPROTECT prevents reading that range, and disabling the
+	  protection erases it, so no factory-loader capture is available. This
+	  diagnostic option is disabled by default.
+
+config APEX_G4B_KBD_CAPTURE
+	bool "Capture keyboard-loop 0xA1 reads instead of ingesting them"
+	default n
+	depends on APEX_G4B_SPIM_KSCAN
+	help
+	  Diagnostic only. Makes the permanent keyboard scan loop run its exact
+	  read path but NEVER ingest a key, so it cannot spam the host, and instead
+	  fill the kbd_cap_* fields of the stage-3 record with the popcount
+	  distribution of the 0xA1 reads and a handful of sample bitmaps, then emit
+	  the record after a 20 s window and halt. This distinguishes malformed
+	  scanner replies from errors in the normal key-ingest path.
+
+config APEX_G4B_KBD_TELEMETRY
+	bool "Emit watchdog, mode, and ingest state over UART every 10 seconds"
+	default n
+	depends on APEX_G4B_SPIM_KSCAN && APEX_G4B_UART_EVIDENCE
+	help
+	  Diagnostic only, and NOT free. The stage-3 record is 1280 bytes, it goes
+	  out twice, and the UART emit is a busy-wait spin at 19200 baud - so this
+	  blocks the g4b thread for about 1.3 s in every 10 s, with no yield.
+
+	  The g4b thread runs at K_PRIO_PREEMPT(10), above ZMK Studio's RPC thread.
+	  The busy-wait UART transfer can therefore make Studio's handshake time out.
+
+	  Enable this when a change may affect key ingestion. Its counter separates
+	  scanner traffic from events delivered to ZMK.
+
+config APEX_G4B_RAIL_MASK
+	hex "Bitmask of P0 pins to raise as vendor rails at boot"
+	default 0x02880000
+	depends on APEX_G4B_SPIM_KSCAN
+	help
+	  Which P0 lines g4b_vendor_rails_init drives high before USB comes up.
+	  Default 0x02880000 = bits 19, 23, 25 - the three the vendor loader
+	  raises on its normal boot path (0x6E388).
+
+	  Leave-one-out on hardware settled which does what:
+	    - drop P0.25 (drive 19+23): USB does NOT enumerate
+	    - drive P0.25 alone:        USB DOES enumerate
+	  P0.25 is necessary and sufficient for USB enumeration and is probably the
+	  U10 enable. P0.19/P0.23 are the IS31FL3743B rail enables and do not affect
+	  USB.
+
+	  The default raises all three during startup. The RGB driver later controls
+	  P0.19 and P0.23 when applying its wireless idle policy.
+
+config APEX_G4B_WATCHDOG
+	bool "Reset the keyboard if the firmware stops running"
+	default n
+	depends on APEX_G4B_STAGE = 3
+	help
+	  Starts the nRF52833 hardware watchdog with a 60 second timeout. The
+	  watchdog is fed only while the mode sampler and keyboard scan loop keep
+	  making progress. It survives a software reset, so the Adafruit bootloader
+	  feeds the inherited watchdog while UF2 or serial DFU is active.
+
+config APEX_G4B_FEED_UNBOUNDED
+	bool "Disable the watchdog feed timeout in diagnostic builds"
+	default n
+	depends on APEX_G4B_SPIM_KSCAN && !APEX_G4B_WATCHDOG
+	help
+	  Lets an old wrapper-based diagnostic image keep running after its normal
+	  feed deadline. The feeder still stops if mode sampling fails. Production
+	  firmware uses APEX_G4B_WATCHDOG instead.
+
+config APEX_G4B_FEED_BUDGET_MS
+	int "Milliseconds to feed the watchdog before stopping for good"
+	default 240000
+	depends on APEX_G4B_SPIM_KSCAN && !APEX_G4B_WATCHDOG
+	help
+	  How long an old wrapper-based diagnostic image feeds the inherited stock
+	  watchdog. After this deadline it stops feeding for the rest of that boot.
+	  Production firmware does not use this setting.
+
+config APEX_G4B_RGB
+	bool
+	default y
+	depends on APEX_G4B_SPIM_KSCAN && LED_STRIP
+	help
+	  The IS31FL3743B driver and the led_strip shim that lets ZMK's underglow
+	  own it. Both files or neither: led_strip_g4b.c calls into rgb_g4b.c,
+	  which calls into pins_g4b.c for the bit-banged CS, so gating them on
+	  different symbols only linked because both happened to be y.
+
+config APEX_G4B_ACTUATION_PRESS
+	int "Actuation point, as a position on the key's stroke (1-255)"
+	default 50
+	range 1 255
+	depends on APEX_G4B_SPIM_KSCAN
+	help
+	  How far a key must travel before it registers. Larger means deeper.
+
+	  This is an INDEX into a 256-entry lookup table in the scanner (STM32 file
+	  offset 0x63E0), not a millimetre value and not a raw field level. The
+	  table is monotonic but NOT linear, and it saturates: everything below
+	  index 4 is 0.2 mm and everything above 0xD3 is 3.8 mm, which is the key's
+	  full travel. Every byte value is meaningful, so there is nothing here that
+	  can be out of range.
+
+	  Useful indices, read out of that table:
+
+	      1.0 mm = 16   1.5 mm = 29   2.0 mm = 46   2.5 mm = 70   3.0 mm = 110
+
+	  Stock ships 50, which is 2.1 mm, and the default here is 50 so an
+	  unconfigured build sends bytes identical to stock.
+
+	  The scanner resolves the index against each key's own factory calibration
+	  before comparing, so one number means the same depth on every key and on
+	  every board. That is what makes setting it globally sensible.
+
+	  Must stay above APEX_G4B_ACTUATION_RELEASE. Note the table's non-linearity
+	  when choosing the gap: near 2 mm one index step is roughly 0.03 mm, but up
+	  at 3 mm a step is nearer 0.1 mm.
+
+	  Must stay above APEX_G4B_ACTUATION_RELEASE; the gap is the hysteresis
+	  that stops a key resting exactly on the point from chattering.
+
+config APEX_G4B_ACTUATION_RELEASE
+	int "Release point, as a position on the key's stroke (1-255)"
+	default 46
+	range 1 255
+	depends on APEX_G4B_SPIM_KSCAN
+	help
+	  How far the key must come back up before it counts as released, on the
+	  same lookup-table index scale as APEX_G4B_ACTUATION_PRESS. Stock ships 46,
+	  which is 2.0 mm against its 2.1 mm press point - so stock's hysteresis is
+	  only about a tenth of a millimetre.
+
+	  The difference between the two is that hysteresis. Too small and a key
+	  held right at the actuation point rattles between pressed and released;
+	  too large and the key needs a noticeable lift before it will fire again.
+
+	  Which of the two bytes the scanner treats as press and which as release is
+	  inference, not proof: the scan loop's primary compare is demonstrably the
+	  low byte (the one this symbol's partner writes), and stock puts the deeper
+	  value there, which is the only reading that makes sense. If a build ever
+	  behaves as though press and release are swapped, this is the thing to
+	  suspect first.
+
+config APEX_G4B_RAPID_TRIGGER
+	int "Rapid trigger re-trigger distance, tenths of a millimetre (0 = off)"
+	default 0
+	range 0 40
+	depends on APEX_G4B_SPIM_KSCAN
+	help
+	  The scanner implements rapid trigger itself, so this is a configuration
+	  value and nothing more - no analog streaming, no extra SPI traffic, no
+	  state machine on the nRF side.
+
+	  With rapid trigger on, a key re-fires as soon as it moves back DOWN by
+	  this distance from wherever it stopped, instead of having to travel back
+	  up past a fixed release point. Releasing works the same way in reverse.
+	  That is what makes repeated presses fast: you never have to let the key
+	  return to the top.
+
+	  0 disables it, which is what stock ships on every real key. 1 to 40 is
+	  0.1 mm to 4.0 mm. Sensible values are 2 to 5; below 2 you are at the
+	  resolution limit of the scanner's travel table, and near the top of the
+	  stroke that table is steep enough that 0.1 mm is not meaningfully
+	  distinguishable.
+
+	  Smaller is twitchier. Too small and a resting finger's tremor re-fires
+	  the key, which reads as double-typing.
+
+	  IMPORTANT - this changes what APEX_G4B_ACTUATION_PRESS means. With rapid
+	  trigger on, the press point is only the ARMING depth for the first press
+	  from a fully released key, and the release point is not used at all.
+	  Afterwards the key is governed entirely by direction changes and this
+	  distance, with one override: a key that returns to the top always
+	  releases.
+
+	  The seven scan positions stock leaves at the scanner's own default are
+	  unpopulated sensors and are left alone.
+
+config APEX_G4B_PIN_SURVEY
+	bool "Survey which unused GPIOs are electrically free"
+	default n
+	depends on APEX_G4B_SPIM_KSCAN && !APEX_G4B_KBD_CAPTURE
+	help
+	  Diagnostic only, and read-only: every candidate pin is configured as an
+	  INPUT and pulled up, read, pulled down, read, then left as a plain input.
+	  DIR is never set to output and OUT is never written, so nothing can be
+	  driven into a pin that turns out to be wired to something else.
+
+	  A pin whose level follows the pull in both directions has nothing else on
+	  it and is a candidate for reuse - two of those is all an I2C display
+	  needs. A pin that stays high or low regardless is held by something
+	  external and must be left alone.
+
+	  P0.18 is nRESET and is excluded in the code regardless of the mask.
+
+	  Results land in the kbd_cap_* region of the stage-3 record, which is
+	  spare in a survey build, and the record is emitted as version 38 so the
+	  decoder knows to read it that way. Needs APEX_G4B_KBD_TELEMETRY to
+	  actually reach the UART, and that in turn stops ZMK Studio connecting -
+	  which is fine for a measurement build.
+
+config APEX_G4B_ANALOG_PROBE
+	bool "Sample per-key analog depth for W/A/S/D and record it"
+	default n
+	depends on APEX_G4B_SPIM_KSCAN && !APEX_G4B_KBD_CAPTURE && !APEX_G4B_PIN_SURVEY
+	help
+	  Issue 0xA2 reads for the scanner block containing W, A, S, and D. The
+	  firmware tracks each key's running minimum, maximum, filtered value, and a
+	  short sample ring. CONFIG_APEX_G4B_GAMEPAD selects this option and sends
+	  the filtered values through its USB HID interface. Without the gamepad,
+	  the samples are diagnostic data only.
+
+	  Issued ONLY while the attention line is low, because the 0xA2 handler can
+	  drop that line and a swallowed attention is a LOST keypress rather than a
+	  late one. It also never runs in the same pass as the 0xA0 heartbeat, so
+	  the loop never does two exchanges in one iteration.
+
+	  Enable APEX_G4B_KBD_TELEMETRY to emit the diagnostic sample record over
+	  UART. Normal release builds keep that telemetry off.
+
+config APEX_G4B_ANALOG_PERIOD_MS
+	int "Milliseconds between analog samples"
+	default 4
+	range 1 100
+	depends on APEX_G4B_ANALOG_PROBE
+	help
+	  4 ms is about 250 Hz, which is well beyond what a game needs and costs
+	  roughly 7 percent of the scan loop. One exchange is ~300 us: 64 bytes out,
+	  a phase gap, 64 bytes back, at 4 Mbit/s.
+
+config APEX_G4B_GAMEPAD
+	bool "Expose per-key depth as a USB gamepad axis"
+	default n
+	select APEX_G4B_ANALOG_PROBE
+	depends on APEX_G4B_SPIM_KSCAN && ZMK_USB
+	help
+	  Adds a SECOND USB HID interface carrying a gamepad, so a racing game can
+	  be steered by how far A and D are pressed instead of in full-lock steps.
+	  Steering is the difference of the two depths, so holding both gives
+	  counter-steer without needing a rule for which key wins.
+
+	  Set CONFIG_USB_HID_DEVICE_COUNT=2 alongside this, or the second instance
+	  does not exist and the driver quietly does nothing.
+
+	  The keyboard remains on HID_0 and the gamepad uses HID_1, so enabling the
+	  gamepad does not change the keyboard report descriptor.
+
+	  The controller is available through standard USB HID APIs such as
+	  DirectInput and Raw Input. Game support varies: controls may need to be
+	  mapped in each game, and some games require a compatibility layer or a
+	  mod. XInput-only games do not see it directly. The gamepad is USB-only;
+	  ZMK's Bluetooth HID map does not include it.
+
+	  Selects the analog probe, since the axis is fed by the same 0xA2 samples.
+
+config APEX_G4B_PIN_BEACON
+	bool "Drive the free pins at distinct duty cycles for meter identification"
+	default n
+	depends on APEX_G4B_SPIM_KSCAN
+	help
+	  Finding which pad on the interposer is which pin, by measurement.
+
+	  Each of the sixteen pins the survey proved free is driven at a different
+	  duty cycle. A multimeter on DC averages the square wave, so every pin
+	  reads as its own steady voltage: P0.01 at 0.19 V through P1.07 at 3.11 V,
+	  194 mV apart. Probe a pad, read the voltage, look it up - no blink
+	  counting and no ambiguity about which pin you are on.
+
+	  UNLIKE APEX_G4B_PIN_SURVEY, THIS DRIVES PINS. It is only reasonable
+	  because the survey established that these sixteen follow an internal pull
+	  in both directions, so nothing else is driving them. The six that are
+	  externally held are excluded and must stay excluded.
+
+	  Diagnostic only - turn it off once the pads are identified, since it holds
+	  sixteen pins as outputs for no other reason.
+
+config APEX_G4B_RGB_PROBE
+	bool "Cycle raw LED registers to establish the colour mapping"
+	default n
+	depends on APEX_G4B_RGB
+	help
+	  Diagnostic only. Ignores ZMK's underglow and drives one register of each
+	  LED's three-register group at a time, three seconds per step, then all
+	  three, then off as a cycle marker.
+
+	  What the board shows names the mapping directly. Inferring it from "the
+	  lights look blue" produced two wrong answers; this produces one right
+	  one. Turn it off once the order is known.
+
+config APEX_G4B_RGB_IDLE_MS
+	int "Begin fading RGB after this many ms of key idle in Bluetooth mode"
+	default 30000
+	range 0 3600000
+	depends on ZMK_RGB_UNDERGLOW
+	help
+	  Applies while the switch is in Bluetooth mode and USB HID is not active.
+	  After the timeout, the LEDs fade to black over about 10 seconds. The
+	  firmware then parks SPIM2 and switches off both LED rails. Key activity
+	  restores the rail and fades the existing frame back in.
+
+	  This does not call zmk_rgb_underglow_off() or change the saved underglow
+	  state. A charge-only battery bank does not create a USB HID endpoint, so
+	  the Bluetooth timeout still applies while it powers the keyboard.
+
+	  0 disables the timeout.
+
+config APEX_G4B_SLEEP_MS
+	int "Enter System OFF after this many ms of key idle, on battery only"
+	default 300000
+	range 0 3600000
+	help
+	  0 disables sleep entirely, which is what every build before this one
+	  did - and not by oversight. Waking an nRF52 from System OFF requires a
+	  configured wake source, and this keyboard has no GPIO kscan to provide
+	  one; keys arrive over SPIM from the STM32. Sleeping without arranging a
+	  way back would be unrecoverable on APPROTECT-locked silicon with a
+	  battery soldered in.
+
+	  What makes it safe is in sleep_g4b.h: two armed wake sources, three
+	  preconditions, and a refusal to sleep at all until a real keypress has
+	  been observed setting the ATTN latch bit on this boot.
+
+	  Waking is a full reset, so the first keypress after a sleep is swallowed
+	  waking the board and BLE has to reconnect. That is inherent to System
+	  OFF, not something this can tune away, so the timeout wants to be long
+	  enough that it only happens when the keyboard has genuinely been left.
+
+config APEX_G4B_SLEEP_SCAN_PERIOD
+	int "Throttle the STM32 scan cadence to this before System OFF (0 = don't)"
+	default 0
+	range 0 255
+	depends on APEX_G4B_SLEEP_MS > 0 && APEX_G4B_STM32_RESET_MS > 0
+	help
+	  The nRF drops to ~2 uA in System OFF, but the STM32 scanner keeps running
+	  at full cadence (~3-5 mA) because its ATTN line is our ONLY wake source -
+	  so the scanner, not the nRF, dominates the sleep-current budget. This sends
+	  SET_MODE 0x20 mode 0x03 <period> to the scanner immediately before we stop
+	  the CPU: mode 0x03 selects the alternate (slower) scan cadence, which still
+	  detects keys and still raises ATTN, just up to <period> later. That extra
+	  latency only ever applies to the very first key that WAKES a sleeping
+	  keyboard (already a full-reset + BLE-reconnect event), so it is free.
+
+	  No restore command is sent, and none is needed: waking from System OFF is a
+	  full reset, and APEX_G4B_STM32_RESET_MS power-cycles the scanner at the next
+	  boot back to full cadence (that dependency is enforced above). Larger period
+	  = slower scan = less sleep current = higher wake latency; the mapping to
+	  microamps and to milliseconds is UNMEASURED - bench it with a current meter
+	  and confirm a key still wakes the board at the chosen value before trusting
+	  it. RAM-only on the STM32; a bad value is undone by the boot power-cycle.
+
+	  0 disables it (no mode command is ever sent, exactly as before). Inert
+	  unless the build actually sleeps (APEX_G4B_SLEEP_MS > 0).
+
+config APEX_G4B_BOOT_DIAG
+	bool "Run the boot-time chord window and diagnostic poll"
+	default n
+	help
+	  Run the 2.5-second boot chord window followed by the stage-3 diagnostic
+	  poll. Both run after scanner configuration and before the permanent key
+	  loop, adding 2500 ms plus APEX_G4B_DEADLINE_MS to every boot.
+
+	  This is intended for scanner measurements. Normal firmware leaves it off
+	  so key input starts as soon as bring-up and replay finish.
+
+config APEX_G4B_USB_KICK
+	bool "Run the USB pull-up investigation sequence at boot"
+	default n
+	depends on ZMK_USB
+	help
+	  Run the USB startup diagnostic at boot. It reposts USBPWRRDY, cycles
+	  USBD->ENABLE, applies the nRF52 USB errata workarounds, and records the
+	  surrounding peripheral state.
+
+	  The sequence adds more than three seconds to every boot and runs its
+	  bounded waits even when USB is disconnected. Normal firmware leaves it off;
+	  P0.25 is raised before USB initialization by the regular board setup.
+
+config APEX_G4B_UART_EMIT
+	bool "Transmit APXG records over the diagnostic UART"
+	default y
+	depends on APEX_G4B_UART_EVIDENCE
+	help
+	  Send each APXG record twice over UARTE0 at 19200 baud so one damaged copy
+	  can be discarded. A pair of stage-3 records takes about 1.4 seconds to
+	  transmit and delays entry into the key loop.
+
+	  Turning this off keeps record collection compiled but suppresses UART
+	  transmission. Release firmware leaves it off. Legacy APXB boot beacons,
+	  when present, are emitted separately by the wrapper.
+
+config APEX_G4B_THREAD_DELAY_MS
+	int "Delay before the g4b thread starts, milliseconds"
+	default 250
+	range 0 5000
+	help
+	  Delay scanner bring-up long enough for ZMK's application-level
+	  initialization to finish. The initialization thread runs at priority 0 and
+	  the scanner thread at preemptible priority 10. This value adds directly to
+	  boot time.
+
+config APEX_G4B_IDLE_AFTER_MS
+	int "Slow the scan loop after this many ms without key activity"
+	default 5000
+	range 0 600000
+	help
+	  0 keeps the loop at full rate forever, which is what it did before.
+
+	  The scan loop sleeps 1 ms per pass, so it wakes the CPU a thousand times
+	  a second whether or not anything is happening. That is what stops the
+	  core ever reaching a meaningful System ON idle: Zephyr parks in WFI only
+	  while every thread is sleeping, and this thread never sleeps for long.
+
+	  This is the mechanism stock uses - it idles in System ON with ATTN as a
+	  PORT/SENSE wake source, rather than stopping the core. The distinction
+	  matters enormously: System ON keeps the BLE link up and wakes in
+	  microseconds, where System OFF resets the chip and pays a full boot plus
+	  a bonded-HID reconnect. That reconnect, not boot time, is what made a
+	  wake take sixteen seconds.
+
+config APEX_G4B_IDLE_POLL_MS
+	int "ATTN wait housekeeping timeout while idle, milliseconds"
+	default 15
+	range 1 200
+	help
+	  Wait on the P0.24 ATTN semaphore once idle, waking immediately on a key.
+	  This value is only the timeout used to service background housekeeping
+	  when no edge arrives; it does not add input latency. The permanent
+	  keyboard loop applies the longer wait only in Bluetooth mode, leaving USB
+	  at its original cadence.
+
+config APEX_G4B_STM32_IDLE_SCAN_PERIOD_MS
+	int "Bluetooth-idle STM32 scan period in milliseconds (0 = disabled)"
+	default 0
+	range 0 255
+	depends on APEX_G4B_STAGE = 3
+	depends on APEX_G4B_SPIM_KSCAN && APEX_G4B_KSCAN_INGEST
+	depends on ZMK_BLE && ZMK_USB
+	depends on !APEX_G4B_KBD_CAPTURE
+	depends on APEX_G4B_IDLE_AFTER_MS > 0 && APEX_G4B_STM32_RESET_MS > 0
+	depends on APEX_G4B_SLEEP_MS = 0
+	depends on APEX_G4B_STM32_STOP1_IDLE_MS = 0
+	help
+	  Send SET_MODE 20 03 <period-ms> after APEX_G4B_IDLE_AFTER_MS while on
+	  battery in the Bluetooth switch position. The STM32 keeps detecting keys
+	  and raising ATTN, but runs its matrix/ADC pass at the alternate period.
+
+	  The first key is detected at the slow cadence. The scanner's installed
+	  mode-1 change callback then clears the alternate selector itself, returning
+	  immediately to the primary period of 1 before it raises ATTN. On the next
+	  ATTN-low pass the Nordic also sends 20 03 01, making the alternate path 1
+	  as a defensive normalization. This is deliberately NOT 20 01 01: reverse
+	  engineering and the captured replay show that RUN setup is rejected with
+	  20 02 02 while the scanner is already in ordinary RUN state.
+
+	  A failed entry or normalization disables the feature for that boot. If the
+	  fast-period repair also fails, the proven scanner power-cycle plus 59-frame
+	  replay recovery runs before normal input resumes.
+
+	  0 disables the feature. Values greater than 1 trade first-key latency for
+	  scanner activity. The release uses 50 ms after the first idle threshold and
+	  the long-idle option below for a second tier. Key wake has been tested; the
+	  resulting current draw has not yet been measured. This never activates in
+	  USB or dongle mode.
+
+config APEX_G4B_STM32_LONG_IDLE_SCAN_PERIOD_MS
+	int "Bluetooth long-idle STM32 scan period in milliseconds (0 = disabled)"
+	default 0
+	range 0 255
+	depends on APEX_G4B_STM32_IDLE_SCAN_PERIOD_MS > 1
+	help
+	  Optionally replace the first mode-3 idle period with a slower second tier
+	  after APEX_G4B_STM32_LONG_IDLE_AFTER_MS of continuous Bluetooth/battery
+	  inactivity. The STM32 protocol carries the period in one byte, so 255 ms
+	  is the maximum representable value.
+
+	  This uses the same ATTN callback, period-1 normalization, failure handling,
+	  and USB/dongle exclusion as the first idle tier. Values should be greater
+	  than APEX_G4B_STM32_IDLE_SCAN_PERIOD_MS; the verifier enforces that
+	  relationship.
+
+config APEX_G4B_STM32_LONG_IDLE_AFTER_MS
+	int "Bluetooth inactivity before the long-idle scanner tier"
+	default 60000
+	range 1000 3600000
+	depends on APEX_G4B_STM32_LONG_IDLE_SCAN_PERIOD_MS > 1
+	help
+	  Continuous battery-powered Bluetooth inactivity required before replacing
+	  the first mode-3 cadence with the long-idle cadence. Any key/ATTN event,
+	  held key, configuration write, USB power, or mode change cancels mode 3 and
+	  restores the scanner to 1 ms before this timer can begin again.
+
+config APEX_G4B_STM32_STOP1_IDLE_MS
+	int "FORENSIC ONLY: reproduce the failed STM32 stopped-state experiment"
+	default 0
+	range 0 3600000
+	depends on APEX_G4B_SPIM_KSCAN && APEX_G4B_KSCAN_INGEST
+	depends on APEX_G4B_STM32_RESET_MS > 0
+	help
+	  0 leaves the proven active scanner path byte-for-byte unchanged.
+
+	  A non-zero value enables the bounded reproduction harness for two failed
+	  2026-09-03 experiments. It is not a usable power-saving feature. The first
+	  canary proved mode-0 request acceptance, then received no key/ATTN wake. The
+	  second tried the Nordic MOSI/READY routine after 50 ms; READY never went low,
+	  and the fallback had to power-cycle and replay the scanner configuration.
+
+	  Once ATTN is low and the keyboard has been idle this long, the harness sends
+	  20 00 01 02, waits at most the interval below, then deliberately repeats the
+	  disproven MOSI/READY assumption. Mode 0 hard-stops the scanner. Stock's
+	  0x28EE4 routine is a link resynchronization with a still-running scanner,
+	  not a STOP1 wake, so its READY-low precondition cannot be met here.
+
+	  All READY waits remain bounded. Failure disables the harness for the rest of
+	  the boot and power-cycles/replays the scanner configuration. Leave this at 0
+	  except when intentionally reproducing the negative result on a recoverable
+	  USB bench setup.
+
+	  Battery/Bluetooth only unless APEX_G4B_STM32_STOP1_ALLOW_USB is selected.
+
+config APEX_G4B_STM32_STOP1_POLL_MS
+	int "Failed scanner-stop reproduction interval, ms"
+	default 20
+	range 1 1000
+	depends on APEX_G4B_STM32_STOP1_IDLE_MS > 0
+	help
+	  Time the reproduction harness leaves the scanner stopped before attempting
+	  the known-invalid MOSI/READY resynchronization. This option exists only to
+	  preserve the exact bounded hardware test; it is not a duty-cycle setting.
+
+config APEX_G4B_STM32_STOP1_ALLOW_USB
+	bool "Allow scanner STOP1 while USB-powered (bench canary only)"
+	default n
+	depends on APEX_G4B_STM32_STOP1_IDLE_MS > 0 && ZMK_USB
+	help
+	  Permit this known-failing stop/resume reproduction while VBUS is
+	  present so evidence can be observed over CDC during a controlled bench
+	  test. Leave this off in a daily build.
+
+config APEX_G4B_BAG_GUARD
+	bool "Ignore bag/pocket key mashing to save battery"
+	default y
+	help
+	  Sustained pressure in a bag can hold several Hall switches down and keep
+	  the scanner loop active. On battery, treat a continuously high key count
+	  as bag pressure: suppress those reports, turn RGB off, and use the slower
+	  poll period until the key count returns to two or fewer. Individual keys
+	  may chatter without resetting the timer. The guard never engages on USB.
+
+config APEX_G4B_BAG_KEYS
+	int "Keys held at once to suspect a bag"
+	default 4
+	range 2 30
+	depends on APEX_G4B_BAG_GUARD
+	help
+	  At or above this many simultaneously held keys, start the bag-pressure
+	  timer. The timer resets when the count falls to two or fewer. Eight or more
+	  keys use a separate one-second threshold in link_g4b.c.
+
+config APEX_G4B_BAG_IDLE_MS
+	int "No-activity time before bag pressure is assumed, ms"
+	default 8000
+	range 0 600000
+	depends on APEX_G4B_BAG_GUARD
+	help
+	  How long the configured key count must remain high before the guard
+	  engages. The timer tolerates individual keys moving while the total stays
+	  above two. Eight or more held keys engage after one second instead.
+
+config APEX_G4B_BAG_POLL_MS
+	int "Scan poll interval while a bag is detected, ms"
+	default 250
+	range 20 2000
+	depends on APEX_G4B_BAG_GUARD
+	help
+	  While the guard is active, sleep this long between reads instead of polling
+	  every millisecond. This also bounds how quickly normal scanning resumes
+	  after the pressure is removed.
+
+config APEX_G4B_BATT_PROBE
+	bool "Periodically sample every candidate battery-sense source"
+	default n
+	depends on APEX_G4B_UART_EVIDENCE
+	help
+	  Legacy diagnostic that samples the candidate SAADC battery inputs every
+	  30 seconds and emits their raw values. Current firmware reads battery
+	  voltage from the BQ25895 instead; this option remains for board analysis.
+
+config APEX_G4B_TWIM_PROBE
+	bool "Report the TWIM pin assignment the vendor loader left behind"
+	default n
+	depends on APEX_G4B_UART_EVIDENCE
+	help
+	  Read the PSEL, ENABLE, FREQUENCY, and ADDRESS registers left by the factory
+	  firmware. The probe does not enable the peripheral or transmit on the bus.
+
+config APEX_G4B_BQ_PROBE
+	bool "Read-only probe of the BQ25895 charger on TWI1"
+	default n
+	depends on APEX_G4B_UART_EVIDENCE
+	help
+	  Read and report four BQ25895 status registers every 30 seconds. This probe
+	  calls only the read path; the same module's normal charge controls use
+	  separate named functions and a five-register write allowlist. Leave the
+	  probe off outside hardware diagnostics.
+
+config APEX_G4B_BATT_FULL_MV
+	int "Battery millivolts that count as 100 percent"
+	default 4180
+	range 3800 4400
+	depends on APEX_G4B_TWI
+	help
+	  The pack is a Fuji 4867A0, 5870 mAh, 3.85 V nominal, labelled "Limited
+	  Charging Voltage: 4.4V" - a high-voltage lithium-polymer cell, not an
+	  ordinary 4.2 V one.
+
+	  Stock programs REG06 to 4.400 V to match that, and its discharge curve is
+	  characterised for it. We instead cap REG06 at 4.096 V for longevity (see
+	  APEX_G4B_CHARGE_LIMIT), so a full charge terminates near there. The gauge
+	  percent is scaled by whatever this value maps to on the vendor curve, so
+	  the reading hits 100 % when the board is actually full at that lower cap.
+
+	  Keep this equal to the charge cap in force: 4096 for the longevity cap,
+	  4180 for the 4.208 V power-on default, or 4370 for stock's 4.400 V (whose
+	  scale factor is one, using the vendor curve unmodified).
+
+config APEX_G4B_TWI
+	bool
+	default y
+	depends on APEX_G4B_BQ_PROBE || ZMK_BATTERY_REPORTING
+	help
+	  Promptless. Compiles src/twi_g4b.c, which both the diagnostic charger
+	  probe and the battery sensor shim need. Neither should have to know that
+	  the other exists.
+
+config APEX_G4B_CHARGE_LIMIT
+	bool "Cap the charge voltage for cell longevity"
+	default y
+	depends on APEX_G4B_TWI
+	help
+	  Take ownership of the BQ25895's charge voltage at boot and cap it at
+	  4.096 V, well below the pack's 4.400 V rated maximum. This keyboard spends
+	  much of its life plugged in, and a high-voltage lithium cell held near its
+	  top voltage is what swells it - the failure owners of this board report.
+	  Charging only to 4.096 V trades roughly a quarter of the runtime for a cell
+	  that stays flat.
+
+	  This is independent of APEX_G4B_BQ_PROBE (the read-only diagnostic): the
+	  cap must apply in the shipping build, where the probe is off. The write
+	  touches only REG06, REG04 and REG07, all on the twi_g4b.c allowlist; it
+	  never disables charging. Turn this off to leave the charger in its 4.208 V
+	  power-on default instead. When on, set APEX_G4B_BATT_FULL_MV to match the
+	  cap so the gauge reads 100 % at a full charge.
+
+config APEX_G4B_CHARGE_STORAGE
+	bool "Storage-band charge control (passthrough, don't hold the cell full)"
+	default y
+	depends on APEX_G4B_TWI && ZMK_BATTERY_REPORTING
+	help
+	  Holds the pack in a healthy band instead of pinning it at the charge cap
+	  and nibble-recharging forever. The BQ25895's power path runs the keyboard
+	  from USB regardless (it runs with the battery removed), so when the pack is
+	  full enough the controller clears REG03 CHG_CONFIG - a true passthrough: the
+	  system stays up on USB and the cell is left idle, neither charged nor
+	  discharged. It resumes charging only once the cell sags below the resume
+	  point. Serviced off the existing ZMK battery fetch (no extra thread).
+
+	  Pairs with APEX_G4B_CHARGE_LIMIT (the 4.096 V cap is the hard ceiling; this
+	  decides when to actually charge toward it). Thresholds are percent of the
+	  pack's 4.400 V-referenced capacity, on the vendor discharge curve.
+
+config APEX_G4B_CHARGE_STOP_PCT
+	int "Stop-charging state of charge (percent of 4.4 V capacity)"
+	default 80
+	range 50 100
+	depends on APEX_G4B_CHARGE_STORAGE
+	help
+	  Backstop stop point. Charging normally stops on the charger's own
+	  termination at the 4.096 V cap (~80 % of the 4.4 V curve); this is an
+	  additional ceiling in case termination is not reported.
+
+config APEX_G4B_CHARGE_RESUME_PCT
+	int "Resume-charging state of charge (percent of 4.4 V capacity)"
+	default 72
+	range 40 95
+	depends on APEX_G4B_CHARGE_STORAGE
+	help
+	  Resume charging once the resting SoC falls to or below this. Kept a few
+	  points under the stop point on purpose: right after a charge the cell's
+	  resting voltage settles ~5 % lower, so a resume point too close to the stop
+	  point would rapid-cycle. 72 gives an ~80/72 hold band; raise toward 75 if
+	  you want it topped up more often, lower it for longer passthrough stretches.
+
+config APEX_G4B_AB_ROLLBACK
+	bool "Enable automatic firmware rollback"
+	default n
+	depends on APEX_G4B_SPINOR_FLASHDEV
+	select CRC
+	help
+	  Append a byte to the boot-health tally at 0x6A000 during SYS_INIT. Erase
+	  the tally after the scanner responds and the selected output is ready. A
+	  non-Bluetooth switch position with VBUS requires USB HID; Bluetooth mode
+	  can pass while BLE remains selected for a charger or battery bank. Image B
+	  starts at 0x8B000 and its descriptor is at 0x69000.
+	  The application writes these external SPI-NOR regions only. Internal flash
+	  restore is implemented by bootloader/apex_pro_mini_wl/ab_promote.c.
+
+config APEX_G4B_STM32_RESET_MS
+	int "Hold the STM32 enables low this long at boot to power-cycle the scanner"
+	default 0
+	help
+	  The STM32 key scanner is powered from the nRF's enable pins (P0.02 + P1.05)
+	  and stays powered across an nRF-only reset (a UF2/DFU flash, sysresetreq).
+	  When only the nRF restarts, the scanner keeps its old state and the two boot
+	  out of step - the "needs a replug" desync (APXT frames=0). bringup_pins()
+	  already drives the enables low before raising them, but only for a few
+	  microseconds, which is not long enough to discharge the scanner's supply.
+	  Setting this to a non-zero millisecond value holds the enables low that long
+	  so the scanner actually power-cycles and comes up fresh, in step with the
+	  nRF - no replug after a flash. Adds this many ms to every boot. 0 keeps the
+	  old microsecond pulse. ~250 is a good starting point; tune up if frames is
+	  still 0 after a soft reset.
+
+config APEX_G4B_AB_AUTOSTAGE
+	bool "Save a healthy application as the recovery image"
+	default y
+	depends on APEX_G4B_AB_ROLLBACK
+	help
+	  Makes the rollback target track the current firmware automatically: the
+	  first time the app reaches HEALTHY and finds that image B does not already
+	  match it, a low-priority thread copies the running app (internal 0x1000)
+	  into B on the external SPI-NOR and re-commits the descriptor. So "just drop
+	  the .uf2" is enough - no manual stage_b.py after a flash. A normal boot
+	  (app already == B) does nothing. The one-time ~20 s NOR erase+copy runs off
+	  the g4b thread with per-op bus locking, so the keyboard keeps working.
+	  Turn off to keep B at a manually selected known-good image instead.
+
+config APEX_G4B_AB_CRASHTEST
+	bool "Fault during startup to test rollback"
+	default n
+	depends on APEX_G4B_AB_ROLLBACK
+	help
+	  Faults immediately after the boot-pending tally is marked, so the tally
+	  accumulates and the bootloader promote fires after fail_thresh boots. Used
+	  once to validate auto-rollback on hardware. NEVER enable in a shipping
+	  image - it makes the app crash on every boot.
+
+config APEX_G4B_SW_RECOVERY
+	bool "Software recovery trigger for the Adafruit UF2 bootloader"
+	default n
+	help
+	  Adds a keymap action that writes the Adafruit UF2 DFU magic (0x57) to
+	  GPREGRET and resets. See src/recovery_g4b.c.
+
+config APEX_G4B_USB_RECOVERY
+	bool "Host-triggered recovery over a USB HID command interface"
+	default y
+	depends on APEX_G4B_SW_RECOVERY && ZMK_USB && USB_DEVICE_STACK
+	help
+	  Adds a vendor HID Feature report that calls g4b_enter_recovery(). This path
+	  requires working USB enumeration; the key and mode-switch paths remain
+	  available separately.
+
+	  This implementation uses Zephyr's legacy USB HID API and is not available
+	  with USB_DEVICE_STACK_NEXT; use APEX_G4B_DFU_TRIGGER there. It needs one
+	  extra USB HID interface beyond the gamepad build, so set
+	  CONFIG_USB_HID_DEVICE_COUNT to 3. Depends on APEX_G4B_SW_RECOVERY for
+	  g4b_enter_recovery(). See src/recovery_usb_g4b.c.
+
+config APEX_G4B_SPINOR_DUMP
+	bool "Dump the external SPI-NOR over UART at boot (read-only)"
+	default n
+	depends on APEX_G4B_UART_EVIDENCE
+	help
+	  One-shot, read-only dump of the external FM25Q08A SPI-NOR (1 MiB) over
+	  SPIM0, framed through the evidence dump channel (UARTE0 at 115200). The
+	  only opcodes issued are 0x9F (JEDEC ID) and 0x03 (read) - no write-enable,
+	  no erase, no page program - so it cannot disturb the staged fs=3/file=11
+	  image the vendor loader applies. It can map that layout or capture a full
+	  backup before enabling a write diagnostic. Leave it off for normal builds.
+	  See src/spinor_g4b.c.
+
+config APEX_G4B_SPINOR_WRITETEST
+	bool "Prove the SPI-NOR write path on a spare blank region (destructive-safe)"
+	default n
+	depends on APEX_G4B_UART_EVIDENCE
+	help
+	  Erase, program, verify, and erase the unused sector at 0x080000. The test
+	  does not access settings or staged firmware. Emits
+	  "APXW e=1 p=1 match=256 ..." over UART on success. Requires
+	  CONFIG_APEX_G4B_UART_EMIT. See src/spinor_g4b.c.
+
+config APEX_G4B_SPINOR_WRITE
+	bool
+	default n
+	help
+	  Promptless. Compiles the SPIM0 staged-firmware write primitives (erase the
+	  staged region 0x014000..0x05F000, page-program, read-back) in
+	  src/spinor_g4b.c. Selected by APEX_G4B_UPDATER; not useful on its own.
+
+config APEX_G4B_UPDATER
+	bool "Legacy SteelSeries-loader self-flash over USB"
+	default n
+	depends on ZMK_USB
+	select APEX_G4B_SPINOR_WRITE
+	help
+	  STOCK-LOADER BUILDS ONLY. Exposes a vendor HID interface (usage page
+	  0xFFC0) that speaks the
+	  SteelSeries Nordic updater protocol - 0x42 erase, 0x43 write chunk, 0x41
+	  reset - and streams the received vendor.bin into the external SPI-NOR staged
+	  file (fs=3/file=11 at 0x014000). On reset the vendor loader validates and
+	  applies it to the live app slot, so a compatible host tool can reflash firmware
+	  over USB with no dongle switch and no recovery mode. The current Adafruit
+	  bootloader does not consume this staged file; keep this option disabled in
+	  g4b_usb.conf and use UF2/serial DFU instead. A dedicated thread owns
+	  the SPIM0 flash so the multi-second erase never stalls USB. Needs one more
+	  HID interface, so set CONFIG_USB_HID_DEVICE_COUNT to 4. See
+	  src/updater_g4b.c.
+
+config APEX_G4B_DONGLE_RADIO
+	bool "Stand down the BLE controller in the dongle position (2.4GHz work)"
+	default n
+	depends on ZMK_BLE
+	help
+	  In the dongle switch position, tear down the Zephyr BLE controller with
+	  bt_disable() so the NRF_RADIO peripheral is freed for a bare-metal
+	  Enhanced-ShockBurst-compatible link to the vendor 2.4GHz receiver (the
+	  stock keyboard's protocol - 2 Mbit, CRC 0x11021, ESB pipe prefixes, no
+	  encryption). Radio ownership is a boot decision: moving the switch across
+	  the dongle boundary resets the board so the correct owner (BLE controller
+	  or, later, our ESB stack) comes up cleanly. This option only performs the
+	  standdown; the ESB transmitter is a separate option. With this off, the
+	  dongle position keeps the normal scanner active and behaves like USB-only.
+	  See src/radio_g4b.c.
+
+config APEX_G4B_EVIDENCE_USB
+	bool "Mirror g4b_evidence text lines to the USB CDC (dfu_cdc)"
+	default n
+	depends on APEX_G4B_UART_EVIDENCE
+	help
+	  In addition to the P0.10 UARTE0 evidence, write g4b_evidence_emit_text
+	  lines to the dfu_cdc CDC-ACM (COM port), so the dongle-radio debug output
+	  is readable over USB without an FTDI adapter on P0.10. Best-effort and
+	  non-blocking (drops when no host is reading).
+
+config APEX_G4B_DFU_TRIGGER
+	bool "USB 1200-baud touch to enter the Adafruit bootloader (DFU)"
+	default n
+	help
+	  Compiles src/dfu_trigger_g4b.c: a host that opens the CDC-ACM port at
+	  1200 baud reboots the keyboard into the Adafruit UF2/serial bootloader
+	  by writing GPREGRET=0x57 and resetting the CPU. Requires the current USB
+	  CDC-ACM stack and CONFIG_UART_LINE_CTRL. The same port also accepts the
+	  APEXDFU! command; the keymap's apex_dfu behavior is independent of it.
+
+config APEX_G4B_ESB
+	bool "Bare-metal 2.4GHz ESB PHY for the vendor receiver (dongle)"
+	default n
+	depends on APEX_G4B_DONGLE_RADIO
+	help
+	  Compiles src/radio_esb_g4b.c, the hand-rolled 2.4GHz radio that reproduces
+	  the stock keyboard's on-air config to the SteelSeries receiver (MODE
+	  Ble_2Mbit, 4-byte address 0x412900+0x71, CRC-24 0x65B/0x00FFFFFF, whitening
+	  on). Runs only after the BLE controller has been stood down
+	  (APEX_G4B_DONGLE_RADIO) so NRF_RADIO is free. For now it only applies the
+	  register config and reports a read-back over the evidence UART; TX/RX and
+	  the pairing state machine build on top. See src/radio_esb_g4b.c.
+
+config APEX_G4B_SPINOR_FLASHDEV
+	bool "Expose the external SPI-NOR as a Zephyr flash device (ZMK storage)"
+	default n
+	depends on FLASH
+	select APEX_G4B_SPINOR_WRITE
+	help
+	  Registers the external FM25Q08A (SPIM0, bit-banged CS) as a Zephyr flash
+	  device (compatible "apex,g4b-spinor", src/flash_spinor_g4b.c) wrapping the
+	  direct-register primitives in src/spinor_g4b.c. Lets NVS/settings live on
+	  the freed 1 MiB external chip instead of the tiny internal partition - point
+	  chosen zephyr,settings-partition at a fixed-partition under the device node.
+	  Keeps CONFIG_SPI/GPIO/PINCTRL off (unlike Zephyr's jedec,spi-nor driver).
+
+config APEX_G4B_SPINOR_NVS_PROVISION
+	bool "One-time format the external NVS partition to 0xFF on first boot"
+	default y
+	depends on APEX_G4B_SPINOR_FLASHDEV
+	help
+	  The external NVS partition (0x60000) may hold stale vendor bytes that are
+	  neither valid NVS nor blank, which nvs_mount cannot handle. This erases the
+	  partition to 0xFF exactly ONCE, guarded by a magic marker written to a
+	  dedicated sector at 0x68000 (outside the partition): if the marker is absent
+	  the partition is formatted and the marker written; if present, nothing is
+	  done, so settings persist across reboots AND across app reflashes. Runs on
+	  the main thread before ZMK settings load - i.e. before the g4b thread starts
+	  its boot replay - so the erase can never collide with the STM32 scanner.
+	  Safe to leave on permanently; it is a no-op after the first format.
+
+config APEX_G4B_SPINOR_FLASHDEV_SELFTEST
+	bool "One-shot flash-API self-test of the external device at boot"
+	default n
+	depends on APEX_G4B_SPINOR_FLASHDEV
+	depends on APEX_G4B_EVIDENCE_USB || APEX_G4B_UART_EVIDENCE
+	help
+	  Exercises flash_erase/write/read through the Zephyr flash API on a scratch
+	  sector (0x81000, above the raw write-test sector) a few seconds after boot and emits
+	  "APXFDEV erase=.. write=.. match=.." over the evidence channel. Verifies the
+	  driver end-to-end. Off by default so production builds don't wear a sector
+	  each boot.
+
+config APEX_G4B_LITTLEFS
+	bool "Mount a LittleFS on the external SPI-NOR free tail"
+	default n
+	depends on APEX_G4B_SPINOR_FLASHDEV
+	depends on FILE_SYSTEM_LITTLEFS
+	help
+	  Mounts a LittleFS at /lfs on littlefs_partition@6b000 (g4b_usb.overlay), a
+	  fixed-partition in the freed 1 MiB external chip's tail - above ZMK NVS
+	  (0x60000-0x68000), the raw provision marker (0x68000), A/B descriptor
+	  (0x69000), and boot tally (0x6A000), ending below the raw write-test
+	  scratch at 0x80000. It does not overlap the app, bootloader, bond store,
+	  or A/B data.
+
+	  Every erase/read/program is routed through the existing apex,g4b-spinor
+	  Zephyr flash device (src/flash_spinor_g4b.c), which already serialises SPIM0
+	  behind the shared g4b_extbus mutex, per-sector lock, and wait_replay gate.
+	  The mount runs from SYS_INIT at APPLICATION priority, before the g4b thread
+	  starts. Mount errors are recorded and do not fail system initialization.
+
+	  No application feature currently reads or writes files on this filesystem.
+
+	  FILE_SYSTEM and FILE_SYSTEM_LITTLEFS are selected here. Neither they nor the
+	  littlefs/lfs/fs_* symbols they link are on verify_g4b.py's forbidden lists;
+	  the flash-stack symbols underneath are the ones already permitted for a
+	  storage build.
+
+config APEX_G4B_COREDUMP
+	bool "Capture CPU faults to a crash ring in the external SPI-NOR"
+	default y
+	select EXTRA_EXCEPTION_INFO
+	help
+	  Overrides Zephyr's weak k_sys_fatal_error_handler. On any CPU fault it
+	  snapshots the exception frame (R0-R3, R12, LR, PC, xPSR), the callee-saved
+	  bank (R4-R11, via CONFIG_EXTRA_EXCEPTION_INFO, which this selects), the SCB
+	  fault-status registers (CFSR/HFSR/BFAR/MMFAR read direct), RESETREAS and a
+	  128-byte slice of the faulting stack into a fixed-size record, writes it to
+	  a 4-slot ring in the measured-free NOR tail (>= 0x69000), then resets. The
+	  last record is read back and emitted over the evidence/USB-CDC channel on
+	  the next boot (lines tagged "APXCD").
+
+	  The write runs in FAULT CONTEXT and is lock-free by construction: it uses
+	  g4b_spinor_fault_write() (src/spinor_g4b.c), which drives SPIM0 directly
+	  and never takes the g4b_extbus mutex or the replay gate - both illegal from
+	  an exception. It preflights the NOR WIP bit (an NVS op may have been
+	  mid-flight) and range-checks the stack pointer against RAM before copying
+	  the slice, so a stack-overflow fault cannot double-fault.
+
+	  Writes are confined to the coredump ring and do not overlap internal flash,
+	  UICR, NVS, or image B. See src/coredump_g4b.c.
+
+config APEX_G4B_SPINOR
+	bool
+	default y
+	depends on APEX_G4B_SPINOR_DUMP || APEX_G4B_SPINOR_WRITETEST || APEX_G4B_SPINOR_WRITE || APEX_G4B_SPINOR_FLASHDEV || APEX_G4B_COREDUMP
+	help
+	  Promptless. Compiles src/spinor_g4b.c, which the external-flash dump, the
+	  write self-test, the self-flash writer, and the crash-ring backing all
+	  share. Kept separate so more than one of them can be enabled without
+	  double-adding the source.

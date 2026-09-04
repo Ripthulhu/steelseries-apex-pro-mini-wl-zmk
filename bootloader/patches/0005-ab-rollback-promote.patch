@@ -1,0 +1,63 @@
+From: Apex ZMK port
+Subject: [PATCH 0005] A/B auto-rollback promote (apex_pro_mini_wl only)
+
+Add the bootloader half of A/B rollback. After three unhealthy boots it checks
+the version-2 descriptor and staged CRC, restores image B only within
+0x1000..0x72000, verifies the restored CRC, and clears the bootloader settings
+page so normal vector validation can continue.
+
+The full-size layout was validated on hardware on 2026-09-03. A 335,612-byte
+image B survived a deliberately faulting app and was restored byte-for-byte;
+UICR stayed unchanged and the recovered app staged itself again.
+
+`ab_promote.c` and `ab_promote.h` are kept with the board port in this repository.
+Copy them to the upstream bootloader's `src/` directory before applying patches.
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 58238bf..8a92a72 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -180,6 +180,11 @@ target_compile_definitions(bootloader PUBLIC
+   __STARTUP_CLEAR_BSS
+   )
+-
++
++if (BOARD STREQUAL "apex_pro_mini_wl")
++  target_sources(bootloader PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src/ab_promote.c)
++  target_compile_definitions(bootloader PUBLIC APEX_ENABLE_AB_ROLLBACK)
++endif ()
++
+ if (SIGNED_FW)
+   if (SIGNED_FW_QX STREQUAL "" OR SIGNED_FW_QY STREQUAL "")
+     message(FATAL_ERROR "SIGNED_FW requires SIGNED_FW_QX and SIGNED_FW_QY to be set")
+diff --git a/src/main.c b/src/main.c
+index c988ee4..7dafa58 100644
+--- a/src/main.c
++++ b/src/main.c
+@@ -60,6 +60,10 @@
+-
++
+ #include "boards.h"
+-
++
++#if defined(APEX_ENABLE_AB_ROLLBACK)
++#include "ab_promote.h"
++#endif
++
+ #include "pstorage_platform.h"
+ #include "nrf_mbr.h"
+ #include "pstorage.h"
+@@ -179,6 +183,12 @@ int main(void) {
+   PRINTF("Bootloader Start\r\n");
+   led_state(STATE_BOOTLOADER_STARTED);
+-
++
++#if defined(APEX_ENABLE_AB_ROLLBACK)
++  /* Restore a validated image B after repeated unhealthy boots. This runs
++   * before application validation and is fenced to 0x1000..0x72000. */
++  ab_promote_check();
++#endif
++
+   // When updating SoftDevice, bootloader will reset before swapping SD
+   if (bootloader_dfu_sd_in_progress()) {
+     led_state(STATE_WRITING_STARTED);

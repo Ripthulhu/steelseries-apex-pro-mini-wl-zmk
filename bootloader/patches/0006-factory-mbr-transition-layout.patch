@@ -1,0 +1,212 @@
+From: Apex ZMK port
+Subject: [PATCH 0006] Add factory-MBR transition layout
+
+The SteelSeries factory MBR contains fixed words at 0xFF8 and 0xFFC which
+select a bootloader at 0x6E000 and its parameter page at 0x6B000. Add an
+opt-in layout for the migration build while leaving the installed 0x74000
+layout unchanged by default. While S113 is still present, the transition
+loader remains in USB DFU instead of treating the SoftDevice vector as an app.
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 8a92a72..0f2f45d 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -140,7 +140,9 @@ target_include_directories(bootloader PUBLIC
+   )
+ 
+ # Debug linker file
+-if (CMAKE_BUILD_TYPE STREQUAL "Debug")
++if (BOARD STREQUAL "apex_pro_mini_wl" AND APEX_LEGACY_LAYOUT)
++  set(LD_FILE ${CMAKE_CURRENT_LIST_DIR}/linker/nrf52833_apex_legacy.ld)
++elseif (CMAKE_BUILD_TYPE STREQUAL "Debug")
+   set(LD_FILE ${CMAKE_CURRENT_LIST_DIR}/linker/${MCU_VARIANT}_debug.ld)
+ else ()
+   set(LD_FILE ${CMAKE_CURRENT_LIST_DIR}/linker/${MCU_VARIANT}.ld)
+@@ -308,6 +310,18 @@ else ()
+   target_compile_definitions(bootloader PUBLIC DFU_APP_DATA_RESERVED=${DFU_APP_DATA_RESERVED})
+ endif ()
+ 
++if (BOARD STREQUAL "apex_pro_mini_wl" AND APEX_LEGACY_LAYOUT)
++  target_compile_definitions(bootloader PUBLIC
++    APEX_LEGACY_LAYOUT
++    BOOTLOADER_REGION_START=0x0006E000
++    BOOTLOADER_MBR_PARAMS_PAGE_ADDRESS=0x0006B000
++    BOOTLOADER_SETTINGS_ADDRESS=0x0006C000
++    BOOTLOADER_CODE_END=0x00078000
++    APEX_AB_APP_MAXLEN=0x00066000
++    APEX_AB_RESTORED_MAGIC=0xB2
++  )
++endif ()
++
+ #----------------------------------
+ # ANT_LICENSE_KEY handling
+ #----------------------------------
+diff --git a/lib/sdk11/components/libraries/bootloader_dfu/bootloader_util.c b/lib/sdk11/components/libraries/bootloader_dfu/bootloader_util.c
+index ce9ad6c..68d19f9 100644
+--- a/lib/sdk11/components/libraries/bootloader_dfu/bootloader_util.c
++++ b/lib/sdk11/components/libraries/bootloader_dfu/bootloader_util.c
+@@ -175,8 +175,12 @@ static inline void bootloader_util_reset(uint32_t start_addr)
+ #endif
+ 
+ // protect flash region from write access
+-static uint32_t bootloader_util_flash_protect(uint32_t address, uint32_t size) {
+-  if ((size & (CODE_PAGE_SIZE - 1)) || (address & (CODE_PAGE_SIZE - 1)) || (address > BOOTLOADER_SETTINGS_ADDRESS)) {
++static uint32_t bootloader_util_flash_protect(uint32_t address, uint32_t size) {
++#if defined(APEX_LEGACY_LAYOUT)
++  if ((size & (CODE_PAGE_SIZE - 1)) || (address & (CODE_PAGE_SIZE - 1))) {
++#else
++  if ((size & (CODE_PAGE_SIZE - 1)) || (address & (CODE_PAGE_SIZE - 1)) || (address > BOOTLOADER_SETTINGS_ADDRESS)) {
++#endif
+     return NRF_ERROR_INVALID_PARAM;
+   }
+ 
+@@ -238,11 +242,20 @@ void bootloader_util_app_start(uint32_t start_addr) {
+   // Protect MBR against user writes
+   bootloader_util_flash_protect(0, MBR_SIZE);
+ 
+-  // Size of the bootloader flash area to protect (Bootloader + MBR params + Bootloader settings)
++#if defined(APEX_LEGACY_LAYOUT)
++  // The factory MBR fixes its parameter page below the bootloader. Protect the
++  // three discontiguous regions independently.
++  bootloader_util_flash_protect(BOOTLOADER_REGION_START,
++                                BOOTLOADER_CODE_END - BOOTLOADER_REGION_START);
++  bootloader_util_flash_protect(BOOTLOADER_MBR_PARAMS_PAGE_ADDRESS, CODE_PAGE_SIZE);
++  bootloader_util_flash_protect(BOOTLOADER_SETTINGS_ADDRESS, CODE_PAGE_SIZE);
++#else
++  // Size of the bootloader flash area to protect (Bootloader + MBR params + Bootloader settings)
+   const uint32_t area_size = BOOTLOADER_SETTINGS_ADDRESS + CODE_PAGE_SIZE - BOOTLOADER_REGION_START;
+ 
+   // Protect bootloader code and params pages against user writes
+-  bootloader_util_flash_protect(BOOTLOADER_REGION_START, area_size);
++  bootloader_util_flash_protect(BOOTLOADER_REGION_START, area_size);
++#endif
+ 
+   // Jump to user application
+   bootloader_util_reset(start_addr);
+diff --git a/lib/sdk11/components/libraries/bootloader_dfu/bootloader.c b/lib/sdk11/components/libraries/bootloader_dfu/bootloader.c
+index 60885b8..e574527 100644
+--- a/lib/sdk11/components/libraries/bootloader_dfu/bootloader.c
++++ b/lib/sdk11/components/libraries/bootloader_dfu/bootloader.c
+@@ -211,6 +211,15 @@ bool bootloader_app_is_valid(void)
+   // inclusive because the empty-descending stack initializes one past RAM end.
+   if (p_bootloader_settings->bank_0 == 0xFFFF)
+   {
++#if defined(APEX_LEGACY_LAYOUT)
++    /* The first 0x1000-based UF2 is not bootable until its completion writes
++     * BANK_VALID_APP. The only exception is a CRC-verified A/B restore, which
++     * leaves an explicit one-boot marker. */
++    if (NRF_POWER->GPREGRET != APEX_AB_RESTORED_MAGIC)
++    {
++      return false;
++    }
++#endif
+     uint32_t const ram_start = 0x20000000UL;
+     uint32_t const ram_end = ram_start + (NRF_FICR->INFO.RAM << 10u);
+     bool const sp_valid = (sp_addr >= ram_start) && (sp_addr <= ram_end) && ((sp_addr & 3U) == 0);
+diff --git a/lib/sdk11/components/libraries/bootloader_dfu/dfu_types.h b/lib/sdk11/components/libraries/bootloader_dfu/dfu_types.h
+index 665f9c4..96ee5b9 100644
+--- a/lib/sdk11/components/libraries/bootloader_dfu/dfu_types.h
++++ b/lib/sdk11/components/libraries/bootloader_dfu/dfu_types.h
+@@ -84,8 +84,12 @@ static inline bool is_sd_existed(void)
+   #ifndef BOOTLOADER_REGION_START
+   #define BOOTLOADER_REGION_START             0x00074000                  /**< This field should correspond to start address of the bootloader, found in UICR.RESERVED, 0x10001014, register. This value is used for sanity check, so the bootloader will fail immediately if this value differs from runtime value. The value is used to determine max application size for updating. */
+   #endif
+-  #define BOOTLOADER_MBR_PARAMS_PAGE_ADDRESS  0x0007E000                  /**< The field specifies the page location of the mbr params page address. */
+-  #define BOOTLOADER_SETTINGS_ADDRESS         0x0007F000                  /**< The field specifies the page location of the bootloader settings address. */
++  #ifndef BOOTLOADER_MBR_PARAMS_PAGE_ADDRESS
++  #define BOOTLOADER_MBR_PARAMS_PAGE_ADDRESS  0x0007E000                  /**< The field specifies the page location of the mbr params page address. */
++  #endif
++  #ifndef BOOTLOADER_SETTINGS_ADDRESS
++  #define BOOTLOADER_SETTINGS_ADDRESS         0x0007F000                  /**< The field specifies the page location of the bootloader settings address. */
++  #endif
+ 
+ #elif  defined(NRF52840_XXAA)
+   // Flash = 1024 KB, allow to be defined in debug mode
+@@ -109,7 +113,10 @@ static inline bool is_sd_existed(void)
+ #define DFU_IMAGE_MAX_SIZE_BANKED       (((DFU_IMAGE_MAX_SIZE_FULL) - \
+                                         (DFU_IMAGE_MAX_SIZE_FULL % (2 * CODE_PAGE_SIZE)))/2)            /**< Maximum size of an application, excluding save data from the application. */
+ 
+-#define DFU_BL_IMAGE_MAX_SIZE           (BOOTLOADER_MBR_PARAMS_PAGE_ADDRESS - BOOTLOADER_REGION_START)  /**< Maximum size of a bootloader, excluding save data from the current bootloader. */
++#ifndef BOOTLOADER_CODE_END
++#define BOOTLOADER_CODE_END             BOOTLOADER_MBR_PARAMS_PAGE_ADDRESS
++#endif
++#define DFU_BL_IMAGE_MAX_SIZE           (BOOTLOADER_CODE_END - BOOTLOADER_REGION_START)  /**< Maximum size of a bootloader, excluding save data from the current bootloader. */
+ #define DFU_BANK_0_REGION_START         CODE_REGION_1_START                                             /**< Bank 0 region start. */
+ #define DFU_BANK_1_REGION_START         (DFU_BANK_0_REGION_START + DFU_IMAGE_MAX_SIZE_BANKED)           /**< Bank 1 region start. */
+ 
+diff --git a/src/main.c b/src/main.c
+index 7dafa58..e25902b 100644
+--- a/src/main.c
++++ b/src/main.c
+@@ -44,6 +44,7 @@
+ #include "nrf_clock.h"
+ #include "nrfx_power.h"
+ #include "nrfx_pwm.h"
++#include "nrfx_nvmc.h"
+ 
+ #include "sdk_common.h"
+ #include "bootloader.h"
+@@ -194,6 +195,16 @@ int main(void) {
+   // TODO move to CF2
+   BOOTLOADER_VERSION_REGISTER = (MK_BOOTLOADER_VERSION);
+ 
++#if defined(APEX_LEGACY_LAYOUT)
++  /* COPY_BL cannot move the discontiguous settings page. Once the factory MBR
++   * has started us, the old vendor record at 0x6C000 is no longer useful and
++   * must not be interpreted as Adafruit bootloader settings. Repeating this
++   * erase is safe until the first completed UF2 removes the S113 signature. */
++  if (is_sd_existed()) {
++    nrfx_nvmc_page_erase(BOOTLOADER_SETTINGS_ADDRESS);
++  }
++#endif
++
+   board_init();
+   bootloader_init();
+   PRINTF("Bootloader Start\r\n");
+@@ -232,6 +232,12 @@ int main(void) {
+     // clear in case we kept DFU_DBL_RESET_APP there
+     (*dbl_reset_mem) = 0;
+ 
++#if defined(APEX_LEGACY_LAYOUT)
++    if (NRF_POWER->GPREGRET == APEX_AB_RESTORED_MAGIC) {
++      NRF_POWER->GPREGRET = 0;
++    }
++#endif
++
+     // start application
+     PRINTF("Starting app...\r\n");
+     bootloader_app_start();
+@@ -262,10 +268,19 @@ static void check_dfu_mode(void) {
+   bool const uf2_dfu         = (gpregret == DFU_MAGIC_UF2_RESET);
+   bool const dfu_skip        = (gpregret == DFU_MAGIC_SKIP);
+ 
++#if defined(APEX_LEGACY_LAYOUT)
++  /* The transition loader must not launch the still-present S113 as though it
++   * were a complete application. Stay in USB DFU until the final 0x1000-based
++   * image replaces the SoftDevice information block. */
++  bool const legacy_transition = is_sd_existed();
++#else
++  bool const legacy_transition = false;
++#endif
++
+   bool const reason_reset_pin = (NRF_POWER->RESETREAS & POWER_RESETREAS_RESETPIN_Msk) ? true : false;
+ 
+   // start either serial, uf2 or ble
+-  bool dfu_start = _ota_dfu || serial_only_dfu || uf2_dfu ||
++  bool dfu_start = _ota_dfu || serial_only_dfu || uf2_dfu || legacy_transition ||
+                    (((*dbl_reset_mem) == DFU_DBL_RESET_MAGIC) && reason_reset_pin);
+ 
+   // Clear GPREGRET if it is our values
+diff --git a/src/usb/uf2/uf2cfg.h b/src/usb/uf2/uf2cfg.h
+index c23a12e..ec491ee 100644
+--- a/src/usb/uf2/uf2cfg.h
++++ b/src/usb/uf2/uf2cfg.h
+@@ -29,7 +29,7 @@
+ #define BOOTLOADER_ADDR_START         BOOTLOADER_REGION_START
+ 
+ // Bootloader end address
+-#define BOOTLOADER_ADDR_END           BOOTLOADER_MBR_PARAMS_PAGE_ADDRESS
++#define BOOTLOADER_ADDR_END           BOOTLOADER_CODE_END
+ 
+ // Address where new bootloader is written before activation (skip application data)
+ #define BOOTLOADER_ADDR_NEW_RECEIVED  (USER_FLASH_END-DFU_BL_IMAGE_MAX_SIZE)

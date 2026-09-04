@@ -1,0 +1,10 @@
+file_format: "1"
+id: apex_pro_mini_wl//zmk
+name: SteelSeries Apex Pro Mini Wireless
+type: board
+arch: arm
+features:
+  - keys
+outputs:
+  - usb
+  - ble

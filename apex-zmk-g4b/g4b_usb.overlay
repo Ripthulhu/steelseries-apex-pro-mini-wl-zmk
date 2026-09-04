@@ -1,0 +1,212 @@
+/* SPDX-License-Identifier: MIT
+ *
+ * Current USB/Studio overlay for the SoftDevice-free Adafruit-loader build.
+ * It enables the Nordic USB controller, the next-generation composite device,
+ * the external-NOR map, and ZMK Studio over WebSerial.
+ *
+ * uart0 remains disabled because optional board diagnostics use UARTE0
+ * directly.
+ * The base board's internal settings node is replaced below; current persistent
+ * builds select the external-NOR settings partition through /chosen.
+ */
+
+/delete-node/ &storage_partition;
+
+/* The production board has the nRF52833 DC/DC inductor populated: stock was
+ * captured with POWER.DCDCEN=1 on this exact hardware.  A system reset clears
+ * that bit, and the old overlay left reg1 in its default LDO mode, so our app
+ * repeatedly measured DCDCEN=0.  Describe the real board wiring to Zephyr so
+ * its PRE_KERNEL SoC init restores the efficient regulator mode every boot.
+ * This is electrically transparent to the USB path; the battery-life benefit
+ * is in the two wireless switch positions. */
+&reg1 {
+    regulator-initial-mode = <NRF5X_REG_MODE_DCDC>;
+};
+
+/ {
+    model = "SteelSeries Apex Pro Mini Wireless G4B";
+
+    chosen {
+        /* Where ZMK settings/NVS live. With CONFIG_APEX_G4B_SPINOR_FLASHDEV the
+         * settings move to a partition on the freed external SPI-NOR (survives an
+         * app reflash); otherwise they stay on the small internal partition. The
+         * bootloader is unaffected either way - UF2/DFU only ever writes the app
+         * into internal flash.
+         *
+         * APEX_G4B_FLASHDEV_DTS is injected by build_g4b.py when the chosen conf
+         * sets CONFIG_APEX_G4B_SPINOR_FLASHDEV=y. It is NOT a Kconfig symbol:
+         * devicetree is preprocessed before Kconfig, so CONFIG_* is invisible
+         * here. The script keeps this macro in lockstep with the real setting. */
+#if defined(APEX_G4B_FLASHDEV_DTS)
+        zephyr,settings-partition = &ext_storage_partition;
+#else
+        zephyr,settings-partition = &nvs_storage_partition;
+#endif
+        zmk,studio-rpc-uart = &studio_rpc_usb_uart;
+        zmk,underglow = &rgb_strip;
+        zmk,battery = &batt_bq;
+    };
+
+#if defined(APEX_G4B_FLASHDEV_DTS)
+    /* External FM25Q08A SPI-NOR (1 MiB) exposed as a Zephyr flash device by
+     * src/flash_spinor_g4b.c (compatible apex,g4b-spinor), driven direct-register
+     * on SPIM0 - no Zephyr SPI/GPIO/PINCTRL, which verify_g4b.py forbids. Only
+     * present when the feature is on, so the default internal-NVS build carries no
+     * dangling flash-map reference (a stray node with no compiled driver breaks
+     * the link with __device_dts_ord_NN undefined).
+     *
+     * Layout on the chip (proven free by the G4B-4 survey; clear of the legacy
+     * staged-firmware region 0x14000-0x5F000):
+     *   0x60000  0x8000   ext_storage_partition - ZMK NVS (8 x 4 KiB sectors)
+     *   0x68000  0x1000   provision marker sector (see NVS_PROVISION in
+     *                      flash_spinor_g4b.c) - not a DT partition, addressed raw
+     *   0x69000  0x1000   A/B descriptor (raw, committed last)
+     *   0x6a000  0x1000   A/B boot-health tally (raw, append-only)
+     *   0x6b000  0x15000  littlefs_partition - LittleFS substrate
+     *   0x80000  0x1000   raw-SPIM diagnostic scratch
+     *   0x81000  0x1000   flash-device diagnostic scratch
+     *   0x82000  0x9000   reserved/free data space
+     *   0x8b000  0x71000  A/B image B (full internal app-slot capacity)
+     *   0xfc000  0x4000   coredump ring
+     * The NVS partition is one-time formatted to 0xFF on first boot because the
+     * chip currently holds a stale vendor record at 0x60000; NVS mounts a blank
+     * partition cleanly but would choke on non-NVS bytes. The LittleFS region is
+     * reserved but is not mounted by the release configuration. */
+    ext_flash: ext_flash@0 {
+        compatible = "apex,g4b-spinor";
+        reg = <0x0 0x100000>;
+        erase-block-size = <0x1000>;
+        write-block-size = <0x1>;
+        #address-cells = <0x1>;
+        #size-cells = <0x1>;
+        status = "okay";
+
+        partitions {
+            compatible = "fixed-partitions";
+            #address-cells = <0x1>;
+            #size-cells = <0x1>;
+
+            ext_storage_partition: partition@60000 {
+                label = "ext-storage";
+                reg = <0x60000 0x8000>;
+            };
+
+            /* Space reserved for the optional LittleFS development feature.
+             * It sits above NVS (ends 0x68000),
+             * the raw provision marker (0x68000), and the A/B descriptor+tally
+             * raw sectors (0x69000, 0x6a000); 0x15000 = 21 x 4 KiB, ending at
+             * 0x80000, immediately BELOW the write-test scratch sector so the two
+             * never overlap. The coredump ring sits far above at 0xFC000 and the
+             * A/B image-B stage at 0x8B000, both clear of this. verify_g4b.py
+             * pins this placement (floor >= 0x6b000, ceiling <= 0x80000). */
+            littlefs_partition: partition@6b000 {
+                label = "lfs";
+                reg = <0x6b000 0x15000>;
+            };
+        };
+    };
+#endif /* APEX_G4B_FLASHDEV_DTS */
+
+    /* The BQ25895 charger as the battery gauge.
+     *
+     * No bus node, for the same reason as rgb_strip below: the driver in
+     * src/battery_bq_g4b.c reads it through src/twi_g4b.c, which drives legacy
+     * TWI1 (SCL P0.16, SDA P0.17) by direct register access. Putting it on a
+     * Zephyr i2c bus would pull in CONFIG_I2C, which this build forces off and
+     * verify_g4b.py fails on.
+     */
+    batt_bq: batt_bq {
+        compatible = "apex,battery-bq25895";
+        status = "okay";
+    };
+
+    /* The IS31FL3743B RGB controller, presented to ZMK underglow through the
+     * led_strip shim in src/led_strip_g4b.c. Not on a Zephyr bus: the shim
+     * drives SPIM2 by direct register writes (SCK P1.09, MOSI P1.08, CS P0.11),
+     * so no spi/pinctrl node is needed and none of CONFIG_SPI/PINCTRL/GPIO is
+     * pulled in.
+     */
+    rgb_strip: rgb_strip {
+        compatible = "apex,g4b-led-strip";
+        status = "okay";
+        chain-length = <66>;
+    };
+};
+
+&kscan0 {
+    compatible = "steelseries,apex-g4b-spim-kscan";
+    status = "okay";
+    rows = <5>;
+    columns = <14>;
+};
+
+/ {
+    behaviors {
+        sysreset {
+            status = "disabled";
+        };
+
+        bootload {
+            status = "disabled";
+        };
+    };
+};
+
+&spi3 {
+    status = "disabled";
+};
+
+/* Keyboard HID for Zephyr's current USB device stack. protocol-code selects
+ * the boot-keyboard subclass used by firmware setup screens and pre-OS tools. */
+/ {
+    hid_kbd: hid_kbd {
+        compatible = "zephyr,hid-device";
+        interface-name = "HID0";
+        protocol-code = "keyboard";
+        in-report-size = <64>;
+        in-polling-period-us = <1000>;
+    };
+
+    /* Analog gamepad (gamepad_g4b.c). 11-byte input report. */
+    hid_gamepad: hid_gamepad {
+        compatible = "zephyr,hid-device";
+        interface-name = "HID1";
+        in-report-size = <11>;
+        in-polling-period-us = <1000>;
+    };
+
+};
+
+/* Studio's RPC over USB CDC-ACM. WebSerial in the browser talks to this. */
+&zephyr_udc0 {
+    status = "okay";
+
+    studio_rpc_usb_uart: studio_rpc_usb_uart {
+        compatible = "zephyr,cdc-acm-uart";
+    };
+
+    /* Separate serial port for the 1200-baud firmware-update request. Optional
+     * diagnostic builds can also write APX* records here. Keeping it separate
+     * prevents Studio from triggering an update when it opens its own port. */
+    dfu_cdc: dfu_cdc {
+        compatible = "zephyr,cdc-acm-uart";
+    };
+};
+
+/* Adafruit_nRF52_Bootloader layout, SoftDevice-free: app at 0x1000 (right above
+ * the MBR), a ~452 KB slot. The s140 region (0x1000-0x27000) was reclaimed once
+ * we confirmed the app never uses the SD - see docs/FLASH_MEMORY_MAP.md. */
+&code_partition {
+    reg = <0x00001000 0x00071000>;
+};
+
+&flash0 {
+    partitions {
+        /* Internal fallback for builds without the external-NOR flash device.
+         * Current persistent builds choose ext_storage_partition instead. */
+        nvs_storage_partition: partition@72000 {
+            label = "storage";
+            reg = <0x00072000 0x00002000>;
+        };
+    };
+};

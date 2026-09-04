@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: MIT
+#
+# The board's IS31FL3743B RGB controller, presented to Zephyr's led_strip
+# subsystem (and thus ZMK underglow) by a thin shim over the direct-register
+# SPIM2 driver in src/rgb_g4b.c. Channel order is handled inside that driver,
+# so unlike the generic led-strip base this binding does not require
+# color-mapping.
+
+description: Apex G4B IS31FL3743B RGB strip (direct-register SPIM2 shim)
+
+compatible: "apex,g4b-led-strip"
+
+include: base.yaml
+
+properties:
+  chain-length:
+    type: int
+    required: true
+    description: Number of RGB LEDs (66 on this board).

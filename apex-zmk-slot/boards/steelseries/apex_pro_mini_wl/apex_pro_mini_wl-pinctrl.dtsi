@@ -1,0 +1,25 @@
+/* SPDX-License-Identifier: MIT */
+
+&pinctrl {
+    /*
+     * Recovered from the stock Nordic image. The STM32 transport is SPIM3
+     * (0x4002f000), not SPIM1. The normal ZMK board keeps it disabled until
+     * the transport driver is enabled explicitly.
+     */
+    apex_stm32_spi_default: apex_stm32_spi_default {
+        group1 {
+            psels = <NRF_PSEL(SPIM_SCK, 0, 4)>,
+                    <NRF_PSEL(SPIM_MOSI, 0, 6)>,
+                    <NRF_PSEL(SPIM_MISO, 0, 7)>;
+        };
+    };
+
+    apex_stm32_spi_sleep: apex_stm32_spi_sleep {
+        group1 {
+            psels = <NRF_PSEL(SPIM_SCK, 0, 4)>,
+                    <NRF_PSEL(SPIM_MOSI, 0, 6)>,
+                    <NRF_PSEL(SPIM_MISO, 0, 7)>;
+            low-power-enable;
+        };
+    };
+};

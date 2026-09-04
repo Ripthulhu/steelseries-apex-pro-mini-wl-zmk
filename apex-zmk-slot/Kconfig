@@ -1,0 +1,41 @@
+# SPDX-License-Identifier: MIT
+
+DT_COMPAT_STEELSERIES_APEX_STM32_KSCAN := steelseries,apex-stm32-kscan
+
+config APEX_STM32_KSCAN
+    bool
+    default $(dt_compat_enabled,$(DT_COMPAT_STEELSERIES_APEX_STM32_KSCAN))
+    depends on KSCAN
+    help
+      Safe bring-up scanner for the stock Apex Pro Mini Wireless STM32.
+      The initial implementation exposes the ZMK kscan device and accepts
+      externally supplied key bitmaps, but performs no SPI transactions.
+
+if APEX_STM32_KSCAN
+
+module = APEX_STM32_KSCAN
+module-str = Apex STM32 kscan
+source "subsys/logging/Kconfig.template.log_config"
+
+endif
+
+config APEX_RECOVERY
+    bool "Legacy SteelSeries vendor-bootloader recovery path"
+    depends on SOC_NRF52833
+    help
+      STOCK-LOADER BUILDS ONLY. Adds a bounded automatic recovery path and, when a shell transport is
+      enabled, explicit recovery commands. Recovery invalidates only the first
+      page of the application slot and resets into the preserved vendor
+      bootloader.
+
+if APEX_RECOVERY
+
+config APEX_RECOVERY_AUTO_RETURN_SECONDS
+    int "Automatic canary return delay in seconds"
+    default 0
+    range 0 300
+    help
+      Non-zero values schedule a one-shot canary return to the vendor
+      bootloader. Set to zero for a persistent image.
+
+endif
