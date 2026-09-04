@@ -69,6 +69,8 @@ The keyboard installs the file and restarts itself. See
   adjustable Hall-effect actuation, rapid trigger, per-key RGB, saved settings,
   and Bluetooth pairing have been tested on the keyboard. ZMK Studio works over
   USB.
+- **No battery required on USB:** this firmware boots and works with the battery
+  physically disconnected. The stock firmware refuses to start in that state.
 - **SteelSeries 2.4 GHz receiver:** not implemented. That switch position works
   only while the keyboard is connected over USB.
 - **USB analog gamepad:** tested, but games may need their input mapping changed.
