@@ -117,6 +117,31 @@ def check_boot_prefix() -> None:
     print(f"boot_prefix=PASS ({expected_count} frames, {actual_hash})")
 
 
+def check_bootloader_recovery_files() -> None:
+    sources = {
+        "bootloader/apex_pro_mini_wl/ab_promote.c": (
+            "ab_promote_info_append",
+            "ab_promote_crash_file",
+            "memcpy(newest_crash, record, sizeof(newest_crash))",
+        ),
+        "bootloader/apex_pro_mini_wl/ab_promote.h": (
+            "void ab_promote_info_append(char *text, uint32_t capacity);",
+            "uint32_t ab_promote_crash_file(const uint8_t **data);",
+        ),
+        "bootloader/patches/0008-apex-recovery-info.patch": (
+            'name = "CRASH   BIN"',
+            "ab_promote_info_append(infoUf2File, sizeof(infoUf2File));",
+            "ab_promote_crash_file(&info[2].content)",
+        ),
+    }
+    for relative, required in sources.items():
+        text = (ROOT / relative).read_text(encoding="utf-8")
+        for token in required:
+            if token not in text:
+                fail(f"bootloader recovery support is incomplete: {relative} lacks {token!r}")
+    print("bootloader_recovery_files=PASS")
+
+
 def check_workspace(lock: dict, work_root: Path, modules: list[str]) -> None:
     work_root = work_root.resolve()
     for name, entry in lock["repositories"].items():
@@ -213,6 +238,7 @@ def main() -> int:
         check_patches(lock)
         modules = read_modules(lock)
         check_boot_prefix()
+        check_bootloader_recovery_files()
         if args.work_root:
             check_workspace(lock, args.work_root, modules)
         if not args.dependencies_only:

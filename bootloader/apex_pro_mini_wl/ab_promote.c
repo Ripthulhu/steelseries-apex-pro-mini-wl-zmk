@@ -36,6 +36,38 @@
 #define AB_VERSION      2u         /* v2: full-size B at NOR 0x8B000 */
 #define AB_FLAG_PROMOTE 0x1u
 
+#define COREDUMP_BASE       0xFC000u
+#define COREDUMP_SLOT_SIZE  0x1000u
+#define COREDUMP_SLOT_COUNT 4u
+#define COREDUMP_MAGIC      0x43585041u /* "APXC" */
+#define COREDUMP_VERSION    1u
+#define COREDUMP_SIZE       248u
+
+enum ab_boot_action {
+    AB_BOOT_UNARMED,
+    AB_BOOT_WAITING,
+    AB_BOOT_BAD_IMAGE,
+    AB_BOOT_CURRENT,
+    AB_BOOT_COPY_FAILED,
+    AB_BOOT_RESTORED,
+};
+
+struct ab_boot_status {
+    enum ab_boot_action action;
+    uint32_t resetreas;
+    uint32_t failures;
+    uint32_t threshold;
+    uint32_t image_len;
+    bool tally_readable;
+    bool crash_present;
+    uint16_t crash_seq;
+    uint32_t crash_reason;
+    uint32_t crash_pc;
+};
+
+static struct ab_boot_status boot_status;
+static uint8_t newest_crash[COREDUMP_SIZE];
+
 /* FM25Q08A on SPIM0 with a software-controlled chip select. */
 #define NOR_SCK   27u
 #define NOR_MOSI  0u
@@ -171,14 +203,14 @@ static bool ab_read_header(struct ab_header *h)
     return true;
 }
 
-static uint32_t ab_tally_fails(void)
+static bool ab_tally_fails(uint32_t *fails_out)
 {
     uint8_t buf[256];
     uint32_t fails = 0u;
 
     for (uint32_t off = 0u; off < AB_SECTOR; off += sizeof(buf)) {
         if (!nor_read(AB_TALLY_ADDR + off, buf, sizeof(buf))) {
-            return 0u; /* Treat an unreadable tally as unarmed. */
+            return false;
         }
         for (uint32_t i = 0u; i < sizeof(buf); i++) {
             if (buf[i] == 0x00u) {
@@ -186,7 +218,50 @@ static uint32_t ab_tally_fails(void)
             }
         }
     }
-    return fails;
+    *fails_out = fails;
+    return true;
+}
+
+static uint16_t get_le16(const uint8_t *p)
+{
+    return (uint16_t)p[0] | ((uint16_t)p[1] << 8);
+}
+
+static uint32_t get_le32(const uint8_t *p)
+{
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
+           ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+static void ab_scan_coredumps(void)
+{
+    uint8_t record[COREDUMP_SIZE];
+    bool found = false;
+    uint16_t best_seq = 0u;
+
+    for (uint32_t slot = 0u; slot < COREDUMP_SLOT_COUNT; slot++) {
+        if (!nor_read(COREDUMP_BASE + slot * COREDUMP_SLOT_SIZE,
+                      record, sizeof(record))) {
+            continue;
+        }
+        if (get_le32(record) != COREDUMP_MAGIC ||
+            get_le16(record + 4u) != COREDUMP_VERSION ||
+            crc32_step(0u, record, COREDUMP_SIZE - 4u) !=
+                get_le32(record + COREDUMP_SIZE - 4u)) {
+            continue;
+        }
+
+        uint16_t seq = get_le16(record + 6u);
+        if (!found || (uint16_t)(seq - best_seq) < 0x8000u) {
+            found = true;
+            best_seq = seq;
+            boot_status.crash_seq = seq;
+            boot_status.crash_reason = get_le32(record + 8u);
+            boot_status.crash_pc = get_le32(record + 40u);
+            memcpy(newest_crash, record, sizeof(newest_crash));
+        }
+    }
+    boot_status.crash_present = found;
 }
 
 void ab_promote_check(void)
@@ -195,13 +270,26 @@ void ab_promote_check(void)
     uint8_t buf[256];
     uint32_t crc = 0u;
 
+    memset(&boot_status, 0, sizeof(boot_status));
+    boot_status.action = AB_BOOT_UNARMED;
+    boot_status.resetreas = NRF_POWER->RESETREAS;
+
     nor_open();
+    ab_scan_coredumps();
 
     if (!ab_read_header(&h)) {
         nor_close();
         return; /* Descriptor is absent or invalid. */
     }
-    if (ab_tally_fails() < h.fail_thresh) {
+    boot_status.threshold = h.fail_thresh;
+    boot_status.image_len = h.b_len;
+    boot_status.tally_readable = ab_tally_fails(&boot_status.failures);
+    if (!boot_status.tally_readable) {
+        nor_close();
+        return;
+    }
+    if (boot_status.failures < h.fail_thresh) {
+        boot_status.action = AB_BOOT_WAITING;
         nor_close();
         return; /* Failure threshold has not been reached. */
     }
@@ -218,6 +306,7 @@ void ab_promote_check(void)
         off += n;
     }
     if (crc != h.b_crc32) {
+        boot_status.action = AB_BOOT_BAD_IMAGE;
         nor_close();
         return; /* Preserve the current application if the staged image is corrupt. */
     }
@@ -226,6 +315,7 @@ void ab_promote_check(void)
      * already the validated B image, do not erase and rewrite it on every boot;
      * continue into the normal DFU/application decision instead. */
     if (crc32_step(0u, (const uint8_t *)AB_APP_BASE, h.b_len) == h.b_crc32) {
+        boot_status.action = AB_BOOT_CURRENT;
         nor_close();
         return;
     }
@@ -235,7 +325,9 @@ void ab_promote_check(void)
         uint32_t erase_len = (h.b_len + (AB_SECTOR - 1u)) & ~(AB_SECTOR - 1u);
 
         flash_nrf5x_erase(AB_APP_BASE, erase_len);
-        for (uint32_t off = 0u; off < h.b_len; ) {
+        uint32_t off;
+
+        for (off = 0u; off < h.b_len; ) {
             uint32_t n = (h.b_len - off < 256u) ? (h.b_len - off) : 256u;
 
             if (!nor_read(AB_BIMG_ADDR + off, buf, n)) {
@@ -245,12 +337,16 @@ void ab_promote_check(void)
             off += n;
         }
         flash_nrf5x_flush(false);
+        if (off != h.b_len) {
+            boot_status.action = AB_BOOT_COPY_FAILED;
+        }
     }
 
     nor_close();
 
     /* Clear the stale bank metadata only after verifying the internal copy. */
     if (crc32_step(0u, (const uint8_t *)AB_APP_BASE, h.b_len) == h.b_crc32) {
+        boot_status.action = AB_BOOT_RESTORED;
         flash_nrf5x_erase(BOOTLOADER_SETTINGS_ADDRESS, CODE_PAGE_SIZE);
 #if defined(APEX_AB_RESTORED_MAGIC)
         /* Permit one erased-settings fallback for this verified restore. */
@@ -258,4 +354,88 @@ void ab_promote_check(void)
         __DSB();
 #endif
     }
+}
+
+static void text_char(char *text, uint32_t capacity, uint32_t *pos, char c)
+{
+    if (*pos + 1u < capacity) {
+        text[(*pos)++] = c;
+        text[*pos] = '\0';
+    }
+}
+
+static void text_str(char *text, uint32_t capacity, uint32_t *pos, const char *s)
+{
+    while (*s != '\0') {
+        text_char(text, capacity, pos, *s++);
+    }
+}
+
+static void text_dec(char *text, uint32_t capacity, uint32_t *pos, uint32_t value)
+{
+    char digits[10];
+    uint32_t count = 0u;
+
+    do {
+        digits[count++] = (char)('0' + value % 10u);
+        value /= 10u;
+    } while (value != 0u);
+    while (count != 0u) {
+        text_char(text, capacity, pos, digits[--count]);
+    }
+}
+
+static void text_hex32(char *text, uint32_t capacity, uint32_t *pos, uint32_t value)
+{
+    static const char hex[] = "0123456789abcdef";
+
+    text_str(text, capacity, pos, "0x");
+    for (int shift = 28; shift >= 0; shift -= 4) {
+        text_char(text, capacity, pos, hex[(value >> shift) & 0xFu]);
+    }
+}
+
+void ab_promote_info_append(char *text, uint32_t capacity)
+{
+    static const char *const action_names[] = {
+        "not armed", "waiting", "staged image invalid",
+        "recovery image already running", "restore interrupted", "restored"
+    };
+    uint32_t pos = (uint32_t)strlen(text);
+
+    text_str(text, capacity, &pos, "Reset: ");
+    text_hex32(text, capacity, &pos, boot_status.resetreas);
+    text_str(text, capacity, &pos, "\r\nA/B: ");
+    text_str(text, capacity, &pos, action_names[boot_status.action]);
+    if (boot_status.threshold != 0u) {
+        text_str(text, capacity, &pos, ", failed boots ");
+        if (boot_status.tally_readable) {
+            text_dec(text, capacity, &pos, boot_status.failures);
+        } else {
+            text_str(text, capacity, &pos, "unknown");
+        }
+        text_char(text, capacity, &pos, '/');
+        text_dec(text, capacity, &pos, boot_status.threshold);
+        text_str(text, capacity, &pos, ", image ");
+        text_dec(text, capacity, &pos, boot_status.image_len);
+        text_str(text, capacity, &pos, " bytes");
+    }
+    text_str(text, capacity, &pos, "\r\nCrash: ");
+    if (!boot_status.crash_present) {
+        text_str(text, capacity, &pos, "none\r\n");
+        return;
+    }
+    text_str(text, capacity, &pos, "sequence ");
+    text_dec(text, capacity, &pos, boot_status.crash_seq);
+    text_str(text, capacity, &pos, ", reason ");
+    text_hex32(text, capacity, &pos, boot_status.crash_reason);
+    text_str(text, capacity, &pos, ", PC ");
+    text_hex32(text, capacity, &pos, boot_status.crash_pc);
+    text_str(text, capacity, &pos, "\r\n");
+}
+
+uint32_t ab_promote_crash_file(const uint8_t **data)
+{
+    *data = newest_crash;
+    return boot_status.crash_present ? (uint32_t)sizeof(newest_crash) : 0u;
 }

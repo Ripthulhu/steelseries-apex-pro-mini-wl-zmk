@@ -76,6 +76,11 @@ written — since the board has no other usable LED. A normal boot stays dark.
 The UF2 application floor and self-update handling are documented in
 [bootloader/README.md](../bootloader/README.md#local-changes).
 
+`INFO_UF2.TXT` on the drive includes the last reset cause, the A/B recovery
+state, and a one-line summary of the newest valid crash record. If a crash has
+been recorded, `CRASH.BIN` contains its 248-byte raw record. Copy that file off
+the drive if you need it for debugging.
+
 ### DFU reset register
 
 In this ZMK/Zephyr tree, `sys_reboot(type)` **does not** set the retention

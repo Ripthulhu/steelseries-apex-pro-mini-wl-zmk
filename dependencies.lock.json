@@ -107,6 +107,7 @@
     "bootloader/patches/0004-cpsid-before-app-jump.patch": "fee9336265a740fe211ca406585cb295244117cb22492c4297f053533b8b2cfb",
     "bootloader/patches/0005-ab-rollback-promote.patch": "3b90acef961b165e8fcfedd83e71dd79c8d16f67eb116ba5c79ce281a87ecd70",
     "bootloader/patches/0006-factory-mbr-transition-layout.patch": "f0d89e98b2e8a39196d2b8482b5098c3bf9b9b16368011f7fd527dd5eed1d4cf",
-    "bootloader/patches/0007-reproducible-version-source.patch": "d643b8e34386992d7a70bd1c962703552f9dd580ccfcf737e120602e556e9821"
+    "bootloader/patches/0007-reproducible-version-source.patch": "d643b8e34386992d7a70bd1c962703552f9dd580ccfcf737e120602e556e9821",
+    "bootloader/patches/0008-apex-recovery-info.patch": "eff6654cbe20cc5b420bd62f2a929bb5ec123c8dcf93fd30f18396c4cf40e832"
   }
 }

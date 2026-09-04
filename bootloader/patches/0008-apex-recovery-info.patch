@@ -1,0 +1,86 @@
+From: Apex ZMK port
+Subject: [PATCH 0008] Add Apex recovery files to the UF2 drive
+
+Append the reset cause, A/B recovery state, failed-boot count, and newest crash
+summary to INFO_UF2.TXT. Expose the validated raw crash record as CRASH.BIN.
+The board code captures these values before USB starts, so reading either file
+does not contend with the application's external-flash bus.
+
+diff --git a/src/usb/uf2/ghostfat.c b/src/usb/uf2/ghostfat.c
+index 1d0f773..fa1857d 100644
+--- a/src/usb/uf2/ghostfat.c
++++ b/src/usb/uf2/ghostfat.c
+@@ -36,6 +36,10 @@
+ #include "bootloader_settings.h"
+ #include "bootloader.h"
+ 
++#if defined(APEX_ENABLE_AB_ROLLBACK)
++#include "ab_promote.h"
++#endif
++
+ //--------------------------------------------------------------------+
+ //
+ //--------------------------------------------------------------------+
+@@ -89,7 +93,8 @@ STATIC_ASSERT(sizeof(DirEntry) == 32);
+ 
+ struct TextFile {
+   const char  name[11] ATTR_NONSTRING;
+-  const char *content;
++  const uint8_t *content;
++  uint32_t size;
+ };
+ 
+ 
+@@ -140,12 +145,15 @@ const char indexFile[] =
+     "</body>"
+     "</html>\n";
+ 
+-static struct TextFile const info[] = {
+-    {.name = "INFO_UF2TXT", .content = infoUf2File},
+-    {.name = "INDEX   HTM", .content = indexFile},
++static struct TextFile info[] = {
++    {.name = "INFO_UF2TXT", .content = (const uint8_t *)infoUf2File},
++    {.name = "INDEX   HTM", .content = (const uint8_t *)indexFile},
++#if defined(APEX_ENABLE_AB_ROLLBACK)
++    {.name = "CRASH   BIN"},
++#endif
+ 
+     // current.uf2 must be the last element and its content must be NULL
+-    {.name = "CURRENT UF2", .content = NULL},
++    {.name = "CURRENT UF2"},
+ };
+ STATIC_ASSERT(ARRAY_SIZE(infoUf2File) < BPB_SECTOR_SIZE); // GhostFAT requires files to fit in one sector
+ STATIC_ASSERT(ARRAY_SIZE(indexFile)   < BPB_SECTOR_SIZE); // GhostFAT requires files to fit in one sector
+@@ -286,6 +294,13 @@ void uf2_init(void)
+   {
+     strcat(infoUf2File, "not found\r\n");
+   }
++
++#if defined(APEX_ENABLE_AB_ROLLBACK)
++  ab_promote_info_append(infoUf2File, sizeof(infoUf2File));
++  info[2].size = ab_promote_crash_file(&info[2].content);
++#endif
++  info[0].size = strlen(infoUf2File);
++  info[1].size = strlen((const char *)info[1].content);
+ }
+ 
+ /*------------------------------------------------------------------*/
+@@ -367,14 +382,16 @@ void read_block(uint32_t block_no, uint8_t *data) {
+             d->updateTime       = __DOSTIME__;
+             d->updateDate       = __DOSDATE__;
+             d->startCluster     = startCluster & 0xFFFF;
+-            d->size = (inf->content ? strlen(inf->content) : UF2_SIZE);
++            d->size = (i == NUM_FILES - 1) ? UF2_SIZE : inf->size;
+         }
+ 
+     } else if (block_no < BPB_TOTAL_SECTORS) {
+ 
+         sectionIdx -= FS_START_CLUSTERS_SECTOR;
+         if (sectionIdx < NUM_FILES - 1) {
+-            memcpy(data, info[sectionIdx].content, strlen(info[sectionIdx].content));
++            if (info[sectionIdx].size != 0u) {
++                memcpy(data, info[sectionIdx].content, info[sectionIdx].size);
++            }
+         } else { // generate the UF2 file data on-the-fly
+             sectionIdx -= NUM_FILES - 1;
+             uint32_t addr = USER_FLASH_START + (sectionIdx * UF2_FIRMWARE_BYTES_PER_SECTOR);

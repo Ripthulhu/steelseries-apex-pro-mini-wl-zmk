@@ -16,8 +16,10 @@ layout is in [FLASH_MEMORY_MAP.md](FLASH_MEMORY_MAP.md).
 
 `CONFIG_APEX_G4B_COREDUMP` handles a fatal fault by writing the CPU state to a
 16 KiB ring in external NOR, then resetting. This is part of recovery,
-not continuous logging. Release builds do not print the record; a diagnostic
-build can read it later. The path was tested with SWD fault injection.
+not continuous logging. Open `APEXBOOT` to see the newest record summarized in
+`INFO_UF2.TXT`; its validated 248-byte record is also available as `CRASH.BIN`.
+The path was tested with SWD fault injection, and the file exported by the
+bootloader was checked against its stored CRC.
 
 ## A/B recovery
 

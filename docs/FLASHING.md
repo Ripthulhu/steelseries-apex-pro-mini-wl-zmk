@@ -28,6 +28,10 @@ cannot overwrite the bootloader.
 If `APEXBOOT` does not appear, check that the cable carries data, reconnect the
 keyboard, and try the key combination again.
 
+The drive also has two small diagnostic files. `INFO_UF2.TXT` shows why the
+keyboard reset and whether A/B recovery is armed. `CRASH.BIN` contains the most
+recent saved crash, when one exists. Neither file is needed for an update.
+
 ## Other ways to open update mode
 
 These are intended for development or recovery. Most users only need the key

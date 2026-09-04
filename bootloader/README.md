@@ -30,7 +30,7 @@ is `0x621E937A`.
 
 ## Local changes
 
-The patches make seven targeted changes:
+The patches make eight targeted changes:
 
 1. enforce the board-defined application floor for app-family UF2 writes;
 2. connect bootloader state to the board's RGB DFU indicator;
@@ -38,7 +38,9 @@ The patches make seven targeted changes:
 4. mask interrupts immediately before jumping to the application;
 5. restore a validated A/B-v2 image after three unhealthy boots;
 6. provide an opt-in layout matching the factory MBR's fixed addresses; and
-7. use the locked source date for reproducible bootloader version metadata.
+7. use the locked source date for reproducible bootloader version metadata; and
+8. add the reset cause, A/B state, and newest crash summary to `INFO_UF2.TXT`,
+   with the validated raw record available as `CRASH.BIN`.
 
 The A/B restore accepts only descriptor version 2, app base `0x1000`, image-B
 offset `0x8B000`, and a length no larger than `0x71000`. It verifies the staged
@@ -90,3 +92,7 @@ The matching full-size A/B-v2 bootloader and application were tested by staging
 a recovery image, forcing three failed boots, then verifying byte-exact rollback,
 UICR preservation, and automatic restaging. The current behavior is described in
 [docs/FEATURES.md](../docs/FEATURES.md#ab-recovery).
+
+The bootloader-only update was also tested over SWD. `INFO_UF2.TXT` reported the
+saved A/B state and newest crash, `CRASH.BIN` matched its stored CRC, and two
+quick pulses on the physical reset line opened `APEXBOOT`.
