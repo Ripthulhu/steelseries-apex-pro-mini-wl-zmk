@@ -24,6 +24,17 @@ zephyr_library_sources_ifdef(CONFIG_APEX_G4B_RGB src/led_strip_g4b.c)
 zephyr_library_sources_ifdef(CONFIG_APEX_G4B_RGB src/rgb_fx_g4b.c)
 zephyr_library_sources_ifdef(CONFIG_APEX_G4B_RGB src/rgb_map_g4b.c)
 zephyr_library_sources_ifdef(CONFIG_APEX_G4B_UART_EVIDENCE src/evidence_g4b.c)
+# apex_control: shared control/telemetry API. Currently only the debug shell
+# uses it; the Studio apex RPC subsystem will add its own condition later.
+zephyr_library_sources_ifdef(CONFIG_APEX_G4B_SHELL src/apex_control_g4b.c)
+zephyr_library_sources_ifdef(CONFIG_APEX_G4B_SHELL src/apex_shell_g4b.c)
+# The `apex` ZMK Studio RPC subsystem (heatmap etc.). Needs ZMK_STUDIO; gated
+# with the shell build for now since it shares the apex_control API. It includes
+# the nanopb-generated proto headers, which land in the app's binary dir (the top
+# build dir) - the app target has that on its include path but this module does
+# not, so add it explicitly.
+zephyr_library_sources_ifdef(CONFIG_APEX_G4B_SHELL src/studio_apex_g4b.c)
+zephyr_library_include_directories_ifdef(CONFIG_APEX_G4B_SHELL ${CMAKE_BINARY_DIR})
 zephyr_library_sources_ifdef(CONFIG_APEX_G4B_GAMEPAD src/gamepad_g4b.c)
 zephyr_library_sources_ifdef(CONFIG_APEX_G4B_DFU_TRIGGER src/dfu_trigger_g4b.c)
 # Compiled for EVERY build of this board, not only gamepad builds. The keymap is
@@ -46,6 +57,7 @@ zephyr_library_sources_ifdef(CONFIG_APEX_G4B_UPDATER src/updater_g4b.c)
 zephyr_library_sources_ifdef(CONFIG_APEX_G4B_AB_ROLLBACK src/ab_rollback_g4b.c)
 zephyr_library_sources_ifdef(CONFIG_APEX_G4B_DONGLE_RADIO src/radio_g4b.c)
 zephyr_library_sources_ifdef(CONFIG_APEX_G4B_ESB src/radio_esb_g4b.c)
+zephyr_library_sources_ifdef(CONFIG_APEX_G4B_DONGLE_LINK src/dongle_link_g4b.c)
 
 # s3_run_keyboard() has one call site. If a preprocessor edit removes that call,
 # -Wunused-function is the only build-time warning. Promote it to an error for

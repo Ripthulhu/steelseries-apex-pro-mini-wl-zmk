@@ -87,4 +87,8 @@ struct g4b_coredump_record {
  * is one. Called from a delayed boot thread so the USB CDC has enumerated. */
 void g4b_coredump_emit_last(void);
 
+/* Copy the newest stored crash record into @out for the apex shell. Returns
+ * false when no valid crash record exists. */
+bool g4b_coredump_read_last(struct g4b_coredump_record *out);
+
 #endif /* APEX_G4B_COREDUMP_H */

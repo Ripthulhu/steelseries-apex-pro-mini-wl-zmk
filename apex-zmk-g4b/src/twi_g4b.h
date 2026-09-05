@@ -150,4 +150,23 @@ bool g4b_bq_power_good(void);
  * unless CONFIG_APEX_G4B_CHARGE_STORAGE. */
 void g4b_bq_storage_tick(uint32_t mv);
 
+/* --- Runtime (live) charge configuration -------------------------------------
+ *
+ * Change the charge-voltage ceiling and current after boot (for host control).
+ * Both write only the allowlisted REG06/REG04 via the named bq_write() path.
+ * VREG is hard-clamped to 3840..4400 mV, so it can never exceed the pack's rated
+ * 4.400 V. They assume g4b_bq_configure_charge() ran at boot (watchdog disarmed).
+ * Return false on I2C failure. Getters return 0 on read failure.
+ */
+bool     g4b_bq_set_vreg_mv(uint16_t mv);
+uint16_t g4b_bq_get_vreg_mv(void);
+bool     g4b_bq_set_ichg_ma(uint16_t ma);
+uint16_t g4b_bq_get_ichg_ma(void);
+
+/* Battery pack temperature from the BQ TS-pin NTC, in whole degC. REQUIRES a
+ * recent ADC conversion (call g4b_bq_sample_mv() first). Returns
+ * G4B_BQ_TEMP_INVALID when the TS pin is out of range / unread. */
+#define G4B_BQ_TEMP_INVALID ((int16_t)-1000)
+int16_t g4b_bq_ts_temp_c(void);
+
 #endif /* APEX_G4B_TWI_H */

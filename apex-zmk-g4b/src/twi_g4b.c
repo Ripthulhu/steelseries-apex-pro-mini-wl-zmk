@@ -310,6 +310,90 @@ bool g4b_bq_configure_charge(void)
     return bq_write(G4B_BQ_REG_ICHG, G4B_BQ_ICHG_1472MA);
 }
 
+/* --- Runtime (live) charge configuration -------------------------------------
+ *
+ * These let a host (shell / Studio) change the charge ceiling and current after
+ * boot. They rely on g4b_bq_configure_charge() having already disarmed the 40 s
+ * I2C watchdog at boot, so a single register write sticks with no periodic kick.
+ * Both go through the same named-op bq_write() (REG06/REG04 only) - there is
+ * still no general write(reg,val), and REG06 is HARD-CLAMPED so VREG can never
+ * be driven above the pack's 4.400 V rated maximum.
+ */
+#define G4B_BQ_VREG_MIN_MV 3840u
+#define G4B_BQ_VREG_MAX_MV 4400u /* Fuji 4867A0 rated max - never exceed */
+#define G4B_BQ_ICHG_MAX_MA 2048u /* 0.35C ceiling; heat/longevity guard */
+
+bool g4b_bq_set_vreg_mv(uint16_t mv)
+{
+    if (mv < G4B_BQ_VREG_MIN_MV) {
+        mv = G4B_BQ_VREG_MIN_MV;
+    }
+    if (mv > G4B_BQ_VREG_MAX_MV) {
+        mv = G4B_BQ_VREG_MAX_MV;
+    }
+    uint8_t steps = (uint8_t)((mv - G4B_BQ_VREG_MIN_MV) / 16u); /* 6-bit field */
+    uint8_t reg = (uint8_t)((steps << 2) | 0x02u); /* BATLOWV=1, VRECHG=0 */
+    return bq_write(G4B_BQ_REG_VREG, reg);
+}
+
+uint16_t g4b_bq_get_vreg_mv(void)
+{
+    struct g4b_twi_result r = g4b_bq_read(G4B_BQ_REG_VREG);
+    if (!r.ok) {
+        return 0u;
+    }
+    return (uint16_t)(G4B_BQ_VREG_MIN_MV + ((r.value >> 2) * 16u));
+}
+
+bool g4b_bq_set_ichg_ma(uint16_t ma)
+{
+    if (ma > G4B_BQ_ICHG_MAX_MA) {
+        ma = G4B_BQ_ICHG_MAX_MA;
+    }
+    uint8_t reg = (uint8_t)((ma / 64u) & 0x7Fu); /* EN_PUMPX (bit7) stays clear */
+    return bq_write(G4B_BQ_REG_ICHG, reg);
+}
+
+uint16_t g4b_bq_get_ichg_ma(void)
+{
+    struct g4b_twi_result r = g4b_bq_read(G4B_BQ_REG_ICHG);
+    if (!r.ok) {
+        return 0u;
+    }
+    return (uint16_t)((r.value & 0x7Fu) * 64u);
+}
+
+/* Battery temperature from the BQ25895 TS pin (a real pack NTC - confirmed: the
+ * TS% swings monotonically as the pack is warmed). REG10 holds TSPCT as bits 6:0
+ * (21% base, weighted); this table maps each of the 128 codes to degC using the
+ * part's reference 103AT network (RT1 5.24k / RT2 30.31k, B 3435). Accurate to a
+ * couple degC; a fixed offset would calibrate it. REG10 is only fresh after an
+ * ADC conversion, so callers must run g4b_bq_sample_mv() first. */
+#define G4B_BQ_REG_TS 0x10u
+static const int8_t g4b_bq_ts_temp_tbl[128] = {
+      85,   84,   83,   82,   81,   80,   79,   78,   77,   76,   75,   74,   73,   72,   71,   70,
+      70,   69,   68,   67,   66,   65,   65,   64,   63,   62,   62,   61,   60,   59,   59,   58,
+      57,   57,   56,   55,   54,   54,   53,   52,   52,   51,   50,   50,   49,   48,   48,   47,
+      46,   46,   45,   45,   44,   43,   43,   42,   41,   41,   40,   39,   39,   38,   38,   37,
+      36,   36,   35,   34,   34,   33,   32,   32,   31,   31,   30,   29,   29,   28,   27,   27,
+      26,   25,   25,   24,   23,   23,   22,   21,   21,   20,   19,   19,   18,   17,   16,   16,
+      15,   14,   13,   13,   12,   11,   10,   10,    9,    8,    7,    6,    5,    4,    3,    2,
+       1,    1,   -1,   -2,   -3,   -4,   -5,   -6,   -7,   -9,  -10,  -11,  -13,  -14,  -16,  -18,
+};
+
+int16_t g4b_bq_ts_temp_c(void)
+{
+    struct g4b_twi_result r = g4b_bq_read(G4B_BQ_REG_TS);
+    if (!r.ok) {
+        return G4B_BQ_TEMP_INVALID;
+    }
+    int8_t c = g4b_bq_ts_temp_tbl[r.value & 0x7Fu];
+    if (c <= -40) {
+        return G4B_BQ_TEMP_INVALID; /* TS open / out of the pack's usable range */
+    }
+    return (int16_t)c;
+}
+
 static bool bq_start_conversion(void)
 {
     struct g4b_twi_result cur = g4b_bq_read(G4B_BQ_REG_ADC);

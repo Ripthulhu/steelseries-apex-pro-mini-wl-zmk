@@ -46,6 +46,63 @@ is a read/write direction and the low six bits select the handler. That's why
 searching the STM32 image for a literal `0xA2` compare finds nothing; the
 handler is reached through a table, not an immediate comparison.
 
+### Boot replay handshake
+
+The STM32 comes up **unconfigured**: it does not scan or report keys until the
+host programs its per-key tables and enables it. A cold `0xA1` before that
+returns nothing useful, so the link cannot be used until this handshake runs.
+This is why bringing up the scanner anywhere (the app at boot, and any would-be
+cold reader like the bootloader) requires replaying the sequence first.
+
+The firmware replays the exact stock configuration captured from stock firmware
+**3.24.1** — 59 frames of 64 bytes, frozen in `apex-zmk-g4b/apex_boot_prefix.h`
+(SHA-pinned; regenerate with `extract_boot_prefix.py --check` against the decoded
+SPIM3 trace). Each frame is sent byte-for-byte and its full 64-byte reply is
+compared against the recorded `expect_rx`; **any mismatch aborts** the bring-up,
+so a clean run is proof the STM32 is in the expected state. Frames are paced at
+**8 ms** (`G4B_S2_FRAME_PACE_US`), matching stock, and gated on the READY line
+like every other exchange (`s2_run_replay` in `link_g4b.c`).
+
+The 59 frames are two near-identical programming passes bracketing the enable:
+
+| Frames | Opcode(s) | Role |
+|--------|-----------|------|
+| 1 | `0x90` | Version query → ASCII `3.24.1` (a fixed, verifiable anchor) |
+| 2 | `0xA4` | Init / config reset |
+| 3–8 | `0x30`,`0x33` ×3 pairs | Per-key actuation + secondary threshold tables |
+| 9 | `0x34` | Table boundary / commit marker |
+| 10–12 | `0x35` ×3 | Per-key rapid-trigger sensitivity (chunked over the 70 keys) |
+| 13–24 | `0x36` ×12 | Per-key **neighbour-adjacency graph**: a 9-byte, `0xFF`-terminated list of each key's grid neighbours (6 keys/frame). Written to `SB+0x4d7+key*9`; two readers (`~0x08007cf4` set / `~0x08007b40` clear) build a live neighbour graph the scanner uses for **neighbour-aware key filtering** (rollover / adjacent-key resolution). It is **logical adjacency, not crosstalk** — measured on hardware, pressing a key shifts *zero* neighbour Hall readings (`apex halldump` diff). |
+| 25–28 | `0x37` ×4 | Per-key table, stride-20 (`37 14 <idx> 14`, idx 0,20,40,60) — semantics unconfirmed |
+| 29 | `0x38 f4 01` | Scan timing/rate = `0x01F4` (500) |
+| 30 | `0x20 01 01` | Scanner state/enable → replies `20 00` |
+| 31–57 | (repeat 3–29) | Second pass; the `0x30`/`0x33` frames carry a `0x20` marker in byte 3 |
+| 58 | `0x20 01 01` | Enable again → now replies `20 02 02` — the state has advanced to configured |
+| 59 | `0xA1` | First key poll (empty when no keys are held) |
+
+The single `0x20` state byte moving from `00` (frame 30) to `02 02` (frame 58) is
+the observable proof the second pass took: the scanner is only "armed" after both
+passes complete. The replay is **not** purely verbatim — `s2_apply_actuation` and
+`s2_apply_rapid_trigger` patch the live user thresholds into the `0x30`/`0x33`
+(and `0x35`) frames before each is sent, so the board boots with the configured
+actuation/rapid-trigger points rather than the stock capture's defaults, while
+every other byte still has to echo exactly. **Never** let `0x32` into this stream
+— it commits calibration to the STM32's flash (see below).
+
+**The config is constructed, not blindly replayed.** `apex-zmk-g4b/build_scanner_config.py`
+rebuilds all 59 frames from a decoded, named model — actuation `{press,release}`
+pairs, the rapid-trigger table, the per-key `0x37` default (`0x14`), the `0x38`
+debounce (`500`), the `0x36` crosstalk-neighbour topology, and the `0x90`/`0xA4`/
+`0x20`/`0xA1` control frames — including the exact fill conventions (config frames
+carry the `{press,release}` pattern in their unused tail; `0x34` masks six bytes;
+the pass-2 `0x30`/`0x33` frames carry a `0x20` marker in byte 3). It reproduces the
+frozen capture **byte-for-byte**, and `tools/verify_release.py` runs it with
+`--check` so any drift — a changed capture or an incomplete decode — fails the
+build. So every byte the firmware sends to the scanner is understood and derived,
+with the capture kept only as the frozen reference to verify against. The one piece
+that is empirical rather than computed is the `0x36` topology (physical PCB magnetic
+coupling); it is a named, per-key neighbour table, not an opaque blob.
+
 ### The key report (`0xA1`)
 
 There is no opcode echo — the reply starts straight into the payload. The

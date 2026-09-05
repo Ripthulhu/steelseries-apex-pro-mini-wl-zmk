@@ -32,6 +32,17 @@ void g4b_mode_sample(void);
 enum g4b_mode g4b_mode_get(void);
 uint16_t g4b_mode_mv(void);
 
+/* Software override of the physical switch. @mode is a g4b_mode to force, or any
+ * out-of-range value (e.g. -1) to return to following the switch. Applied to
+ * g4b_mode_get(), so every consumer (endpoint policy, and in radio builds the
+ * radio-owner reset) honors it. The new policy is applied immediately. The
+ * override is kept in NOINIT RAM, so it survives a warm reset (the reset that
+ * reassigns radio ownership) but not a power cycle. */
+void g4b_mode_set_override(int mode);
+
+/* Current override, or -1 when following the switch. */
+int g4b_mode_get_override(void);
+
 /* True if the switch was in the dongle position at boot. Latched once in
  * g4b_mode_init(), so it names the RADIO owner chosen for this launch (BLE
  * controller vs. our ESB stack) - see radio_g4b.c. */

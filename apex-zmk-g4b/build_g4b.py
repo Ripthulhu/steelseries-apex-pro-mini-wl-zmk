@@ -98,6 +98,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--high-wrapper", action="store_true")
     parser.add_argument("--persistent", action="store_true")
     parser.add_argument("--plain-image", action="store_true")
+    parser.add_argument("--shell", action="store_true",
+                        help="debug build: apex UART shell + logging over a USB "
+                             "CDC port (implies --plain-image; skips the release audit)")
     parser.add_argument("--stop1-canary", action="store_true")
     parser.add_argument("--wireless-idle", "--mode3-canary", action="store_true")
     parser.add_argument("--ab-rollback", "--ab-canary", action="store_true")
@@ -136,6 +139,10 @@ def main() -> int:
     if args.ab_crash_test and not args.ab_rollback:
         fail("--ab-crash-test requires --ab-rollback")
     if args.stop1_canary or args.wireless_idle or args.ab_rollback:
+        args.plain_image = True
+    if args.shell:
+        if not args.usb_studio:
+            fail("--shell requires --usb-studio (uses g4b_usb.conf + g4b_usb.overlay)")
         args.plain_image = True
     if args.usb_studio:
         args.high_wrapper = True
@@ -184,6 +191,8 @@ def main() -> int:
         (args.ab_crash_test, "g4b_ab_crashtest.conf"),
     )
     conf_files.extend(HERE / name for enabled, name in additions if enabled)
+    if args.shell:
+        conf_files.append(HERE / "g4b_shell.conf")
     conf_files.extend(path.expanduser().resolve() for path in args.extra_conf)
     for path in conf_files:
         if not path.is_file():
@@ -226,6 +235,8 @@ def main() -> int:
         dts_flags.append("-DZMK_BEHAVIORS_KEEP_ALL")
     if flash_dev:
         dts_flags.append("-DAPEX_G4B_FLASHDEV_DTS")
+    if args.shell:
+        dts_flags.append("-DAPEX_G4B_SHELL_DTS")
     run([
         cmake, "-GNinja", "-S", cmake_path(upstream / "app"),
         "-B", cmake_path(build_dir),
@@ -292,9 +303,13 @@ def main() -> int:
             verify.append("--ab-v2")
         if args.ab_crash_test:
             verify.append("--ab-crash-test")
-        run(verify)
+        if args.shell:
+            print("Shell/debug build: skipping the release plain-image audit "
+                  "(SHELL/LOG are intentionally present).")
+        else:
+            run(verify)
         print(f"PlainImage: {image} ({image.stat().st_size} bytes)")
-        print("Plain build and verification complete. Nothing was flashed.")
+        print("Plain build complete. Nothing was flashed.")
         return 0
 
     tool_bin = sdk / "arm-zephyr-eabi" / "bin"

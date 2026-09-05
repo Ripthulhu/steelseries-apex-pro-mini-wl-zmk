@@ -210,3 +210,21 @@
         };
     };
 };
+
+#ifdef APEX_G4B_SHELL_DTS
+/* Debug-only: a third USB CDC-ACM port carrying the interactive `apex` shell and
+ * log output. Present only in --shell builds (APEX_G4B_SHELL_DTS); the release
+ * image has just the Studio RPC and DFU ports above. */
+&zephyr_udc0 {
+    shell_cdc: shell_cdc {
+        compatible = "zephyr,cdc-acm-uart";
+    };
+};
+
+/ {
+    chosen {
+        zephyr,shell-uart = &shell_cdc;
+        zephyr,console = &shell_cdc;
+    };
+};
+#endif /* APEX_G4B_SHELL_DTS */

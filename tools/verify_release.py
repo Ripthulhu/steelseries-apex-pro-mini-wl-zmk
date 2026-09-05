@@ -116,6 +116,18 @@ def check_boot_prefix() -> None:
         fail(f"boot prefix checksum changed ({actual_hash} != {expected_hash})")
     print(f"boot_prefix=PASS ({expected_count} frames, {actual_hash})")
 
+    # The config is not a blind capture: prove every frame is reconstructible from
+    # the decoded named parameters (build_scanner_config.py). If this fails, either
+    # the capture drifted or the decoded model is incomplete - both must be fixed.
+    constructor = ROOT / "apex-zmk-g4b" / "build_scanner_config.py"
+    result = subprocess.run(
+        [sys.executable, str(constructor), "--check"],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        fail(f"scanner config no longer constructs from named parameters:\n{result.stdout}{result.stderr}")
+    print("boot_prefix_constructed=PASS (59 frames rebuilt from named parameters)")
+
 
 def check_bootloader_recovery_files() -> None:
     sources = {

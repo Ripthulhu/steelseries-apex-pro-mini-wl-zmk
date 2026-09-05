@@ -9,6 +9,7 @@
  */
 
 #include <string.h>
+#include <errno.h>
 
 #include <zephyr/kernel.h>
 #include <zephyr/sys/util.h>
@@ -43,6 +44,9 @@
 #endif
 #if IS_ENABLED(CONFIG_APEX_G4B_AB_ROLLBACK)
 #include "ab_rollback_g4b.h"
+#endif
+#if IS_ENABLED(CONFIG_APEX_G4B_DONGLE_LINK)
+#include "dongle_link_g4b.h"
 #endif
 
 BUILD_ASSERT(CONFIG_APEX_G4B_STAGE >= 0 && CONFIG_APEX_G4B_STAGE <= 7,
@@ -499,6 +503,146 @@ static uint8_t s3_rt_last_on =
  * transition that matters is 0 -> 1, so this needs no more than volatile.
  */
 static volatile uint8_t s3_cfg_dirty;
+
+/* Shell-requested component resets / power, serviced from the ATTN-low branch of
+ * the keyboard loop (the single-writer-safe point where nothing is queued). The
+ * shell thread only sets these flags; the g4b thread owns the pins and SPIM. */
+static volatile uint8_t s3_req_stm32_reset;
+static volatile uint8_t s3_req_rgb_reset;
+static volatile uint8_t s3_req_usb_reset;
+static volatile int8_t  s3_req_rgb_rail = -1; /* -1 none, 0 = power down, 1 = up */
+
+/* Shell-requested RAW STM32 frame exchange (a debug tool for the scanner
+ * protocol). The shell fills s3_raw_tx and sets pending; the g4b thread runs one
+ * 64-byte exchange at the same single-writer-safe point and returns the reply.
+ * The shell guards the dangerous opcodes (0x01/0x02/0x32) before requesting. */
+static volatile uint8_t s3_req_raw_pending;
+static volatile uint8_t s3_req_raw_done;
+static volatile uint8_t s3_req_raw_ok;
+static uint8_t s3_raw_tx[G4B_SPIM_FRAME];
+static uint8_t s3_raw_rx[G4B_SPIM_FRAME];
+
+void g4b_request_stm32_reset(void)
+{
+    s3_req_stm32_reset = 1u;
+}
+void g4b_request_usb_rail_reset(void)
+{
+    s3_req_usb_reset = 1u;
+}
+void g4b_request_rgb_reset(void)
+{
+    s3_req_rgb_reset = 1u;
+}
+void g4b_request_rgb_rail(bool on)
+{
+    s3_req_rgb_rail = on ? 1 : 0;
+}
+
+/* Send one raw 64-byte frame to the STM32 and return its reply. Called from the
+ * shell thread; the actual exchange runs on the g4b thread (single-writer). tx is
+ * zero-padded to a full frame. Returns 0 on a clean exchange, negative on error. */
+int g4b_scan_raw(const uint8_t *tx, uint32_t len, uint8_t *rx, uint32_t timeout_ms)
+{
+    if (tx == NULL || rx == NULL || len == 0u || len > G4B_SPIM_FRAME) {
+        return -EINVAL;
+    }
+    if (s3_req_raw_pending) {
+        return -EBUSY;
+    }
+    memset(s3_raw_tx, 0, sizeof(s3_raw_tx));
+    memcpy(s3_raw_tx, tx, len);
+    s3_req_raw_done = 0u;
+    s3_req_raw_ok = 0u;
+    __DMB();
+    s3_req_raw_pending = 1u; /* hand off to the g4b thread */
+
+    uint32_t waited = 0u;
+    while (!s3_req_raw_done && waited < timeout_ms) {
+        k_msleep(2);
+        waited += 2u;
+    }
+    if (!s3_req_raw_done) {
+        s3_req_raw_pending = 0u;
+        return -ETIMEDOUT;
+    }
+    memcpy(rx, s3_raw_rx, G4B_SPIM_FRAME);
+    return s3_req_raw_ok ? 0 : -EIO;
+}
+
+/* Full scanner re-bring-up (the 59-frame boot config replay). Defined below;
+ * forward-declared so the shell raw-frame recovery can re-arm the scanner in
+ * place without a whole reboot. */
+static void s2_run_replay(uint32_t start, uint32_t deadline_cycles);
+
+/* Runs on the g4b thread from the ATTN-low branch. Owns the pins and SPIM here,
+ * so component resets are safe. */
+static void s3_service_shell_requests(void)
+{
+    if (s3_req_stm32_reset) {
+        s3_req_stm32_reset = 0u;
+        /* Drop the STM32 enable lines for a full 250 ms - a real power-off so the
+         * scanner actually resets and reboots (a short glitch leaves it in a bad
+         * state and the keyboard stops typing). Its RAM actuation/RT/fx config is
+         * lost across this, so mark it dirty to re-send once it is back. */
+        g4b_pin_clr(G4B_PORT0, G4B_P0_EN);
+        g4b_pin_clr(G4B_PORT1, G4B_P1_EN);
+        k_msleep(250);
+        g4b_pin_set(G4B_PORT0, G4B_P0_EN);
+        g4b_pin_set(G4B_PORT1, G4B_P1_EN);
+        s3_cfg_dirty = 1u;
+    }
+    if (s3_req_usb_reset) {
+        s3_req_usb_reset = 0u;
+        /* Pulse the USB data-path rail (P0.25) low then high to force a USB
+         * re-enumeration. It is ALWAYS restored in this same operation - never
+         * left low, or USB (and this shell) would be gone until a power cycle. */
+        NRF_P0->OUTCLR = BIT(25);
+        k_msleep(150);
+        NRF_P0->OUTSET = BIT(25);
+    }
+    if (s3_req_raw_pending) {
+        /* One raw 64-byte scanner exchange for the shell. Safe here: ATTN is low
+         * so nothing is queued, and we own the SPIM. The shell already refused the
+         * dangerous opcodes before setting this. */
+        struct g4b_exchange_stats stats = {0};
+        g4b_spim_arm_ready();
+        (void)g4b_spim_exchange(s3_raw_tx, s3_raw_rx, &stats);
+        s3_req_raw_ok = (stats.result == G4B_SPIM_OK) ? 1u : 0u;
+
+        /* A raw frame injected outside the loop's own rhythm (an 0xA2 lowers ATTN,
+         * an 0xA1 consumes an event) leaves the scanner's event state stuck, so
+         * keys stop reaching us until the next full bring-up. Just re-issuing the
+         * enable is not enough - the event state only re-arms on the full config
+         * sequence - so re-run the whole 59-frame boot replay here (~0.5 s, the
+         * same thing a reboot does), so a probe can never strand the keyboard. */
+        s2_run_replay(g4b_cyccnt(), G4B_S2_REPLAY_BUDGET_CYCLES);
+        s3_cfg_dirty = 1u;
+
+        s3_req_raw_pending = 0u;
+        __DMB();
+        s3_req_raw_done = 1u;
+    }
+#if IS_ENABLED(CONFIG_APEX_G4B_RGB)
+    if (s3_req_rgb_reset) {
+        s3_req_rgb_reset = 0u;
+        g4b_rgb_rail_down();
+        k_msleep(10);
+        g4b_rgb_rail_up();
+        g4b_rgb_bringup();
+    }
+    if (s3_req_rgb_rail >= 0) {
+        int8_t want = s3_req_rgb_rail;
+        s3_req_rgb_rail = -1;
+        if (want == 0) {
+            g4b_rgb_rail_down();
+        } else {
+            g4b_rgb_rail_up();
+            g4b_rgb_bringup();
+        }
+    }
+#endif
+}
 
 static void s2_apply_actuation(uint8_t *tx)
 {
@@ -1679,6 +1823,23 @@ static void s3_resend_config(void)
     }
 }
 
+/* STM32 scanner-link health, exposed to the apex shell (`apex link`). */
+void g4b_link_stats_get(struct g4b_link_stats *out)
+{
+    if (out == NULL) {
+        return;
+    }
+    out->frames_run = record_s3.frames_run;
+    out->frames_matched = record_s3.frames_matched;
+    out->ingest_calls = record_s3.ingest_calls;
+    out->ingest_ok = record_s3.ingest_ok;
+    /* Live counters from the permanent keyboard loop - these move as keys are
+     * pressed, unlike the boot snapshots above (which the loop assigns once at
+     * handover and never touches again). */
+    out->live_key_events = s3_ingest_events;
+    out->live_keepalives = s3_a0_polls;
+}
+
 #if IS_ENABLED(CONFIG_APEX_G4B_RGB)
 /* Per-key depth for the analog lighting effect.
  *
@@ -1730,6 +1891,26 @@ static uint16_t g4b_depth_ingest(uint8_t slot, uint16_t raw)
     return f;
 }
 
+/* Set by the apex shell (`apex depth`) to force one/again 0xA2 sampling even
+ * when no analog RGB effect is active, so per-key travel can be read on demand. */
+static volatile bool g4b_depth_force_flag;
+
+void g4b_depth_force(bool on)
+{
+    g4b_depth_force_flag = on;
+}
+
+/* Copy the filtered per-key depth (raw ADC ~337 released .. ~3959 pressed;
+ * 0 = not yet sampled). Returns the true slot count regardless of @max. */
+size_t g4b_depth_read(uint16_t *out, size_t max)
+{
+    size_t n = (max < (size_t)G4B_SCAN_SLOTS) ? max : (size_t)G4B_SCAN_SLOTS;
+    for (size_t i = 0; i < n; i++) {
+        out[i] = g4b_depth_ema[i];
+    }
+    return (size_t)G4B_SCAN_SLOTS;
+}
+
 static void s3_analog_light(void)
 {
     static uint8_t win;
@@ -1739,7 +1920,7 @@ static void s3_analog_light(void)
                         ? 32u
                         : (uint8_t)(G4B_SCAN_SLOTS - start);
 
-    if (!g4b_fx_wants_analog()) {
+    if (!g4b_fx_wants_analog() && !g4b_depth_force_flag) {
         return;
     }
 
@@ -3421,6 +3602,14 @@ static void s3_run_keyboard(void)
                 continue;
             }
 
+#if IS_ENABLED(CONFIG_APEX_G4B_DONGLE_LINK)
+            /* Tap every valid absolute bitmap into the 2.4 GHz operational-link
+             * report queue. The module dedups internally (independent of ZMK's
+             * kscan state, which may be disabled in dongle mode) and queues the
+             * all-zero release too. */
+            g4b_dongle_link_on_bitmap(s2_rx);
+#endif
+
             /* Deduplicate against the previous absolute bitmap. ATTN is event
              * gated, so a changed bitmap must be accepted on its first successful
              * read; waiting for a duplicate would discard the event.
@@ -3476,6 +3665,9 @@ static void s3_run_keyboard(void)
             if (s3_mode3_normalize_if_needed()) {
                 continue;
             }
+            /* Service any shell-requested component reset/power change here,
+             * before a possible sleep - this is the single-writer-safe point. */
+            s3_service_shell_requests();
             /* Only ever from here, where ATTN is known low - see the note on
              * s3_sleep_maybe(). Never returns if it decides to sleep.
              */
@@ -4381,10 +4573,15 @@ emit:
      * succeed. A failed bring-up leaves the scanner off and lets the watchdog
      * hand control back to the bootloader. */
     /* An experimental dongle build gives its radio thread the CPU in the dongle
-     * position. Normal releases compile that transport out and keep scanning. */
+     * position. Normal releases compile that transport out and keep scanning.
+     * The operational-link build (DONGLE_LINK) is the exception: the scanner
+     * must keep running so its absolute bitmaps can be queued for the radio, so
+     * s3_run_keyboard() runs even in the dongle position there. The link runs on
+     * its own thread (g4b_dongle_link_tid). */
     if (record.bringup_ok &&
         (!IS_ENABLED(CONFIG_APEX_G4B_DONGLE_RADIO) ||
-         g4b_mode_get() != G4B_MODE_DONGLE)) {
+         g4b_mode_get() != G4B_MODE_DONGLE ||
+         IS_ENABLED(CONFIG_APEX_G4B_DONGLE_LINK))) {
         s3_run_keyboard();
     }
 #endif

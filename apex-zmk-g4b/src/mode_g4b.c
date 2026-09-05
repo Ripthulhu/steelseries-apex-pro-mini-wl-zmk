@@ -56,6 +56,16 @@ static uint8_t mode_flags;
 /* Boot-time position used to assign radio ownership. */
 static bool boot_is_dongle;
 
+/* Software override of the switch: -1 = follow the switch, else a forced
+ * g4b_mode. Kept in NOINIT RAM so a forced dongle/non-dongle survives the warm
+ * reset that reassigns the radio; the magic guards against power-on garbage. */
+#define G4B_MODE_RETAIN_MAGIC 0x4D4F4445u /* "MODE" */
+static __noinit struct {
+    uint32_t magic;
+    int8_t mode;
+} mode_retain;
+static int8_t mode_override = -1;
+
 /* The thresholds lie between the measured switch levels of approximately
  * 0 mV, 1670 mV, and 3345 mV. Their smallest margin is about 700 mV, well above
  * the SAADC error budget. A failed SAADC read leaves the cached mode and sample
@@ -121,6 +131,9 @@ void g4b_mode_sample(void)
 
 enum g4b_mode g4b_mode_get(void)
 {
+    if (mode_override >= 0) {
+        return (enum g4b_mode)mode_override;
+    }
     return mode_cached;
 }
 
@@ -165,8 +178,9 @@ static void mode_gate_work(struct k_work *work)
     ARG_UNUSED(work);
 
 #if IS_ENABLED(CONFIG_APEX_G4B_DONGLE_RADIO)
-    /* Reset after a settled dongle-boundary change to reassign radio ownership. */
-    if ((mode_cached == G4B_MODE_DONGLE) != boot_is_dongle) {
+    /* Reset after a settled dongle-boundary change to reassign radio ownership.
+     * Uses g4b_mode_get() so a software override crosses the boundary too. */
+    if ((g4b_mode_get() == G4B_MODE_DONGLE) != boot_is_dongle) {
         NVIC_SystemReset();
     }
 
@@ -181,31 +195,70 @@ static void mode_gate_work(struct k_work *work)
      * transport policy from a context where Bluetooth APIs are available.
      */
 #if IS_ENABLED(CONFIG_ZMK_BLE)
-    /* Reapply the policy because ZMK may restart advertising after BLE events. */
+    /* Edge-triggered so nothing churns every second (which made ZMK log a
+     * <dbg> transport line and a <wrn> "Not sending" every tick, flooding a debug
+     * shell). We re-select the report transport only when the desired value
+     * changes (mode or USB-host readiness).
+     *
+     * Advertising is owned ENTIRELY by ZMK's own state machine
+     * (update_advertising() in ble.c). We must NOT call bt_le_adv_stop() or
+     * force bt_conn_disconnect() from here: ZMK ignores the preferred transport
+     * when deciding to advertise and re-runs update_advertising() on every
+     * disconnect, so a stop/disconnect issued behind its back interleaves with
+     * ZMK re-opening advertising and races the controller's LLL radio event -
+     * asserting in lll_adv.c prepare_cb (kernel oops -> self-reboot on mode
+     * switch). Setting the preferred transport is enough; a live BLE link simply
+     * stops being the report sink, which is the desired behavior. */
+    static int last_want = -1;
+
+    enum zmk_transport want;
     if (mode_cached != G4B_MODE_BT) {
-        (void)zmk_endpoint_set_preferred_transport(ZMK_TRANSPORT_USB);
-        (void)bt_le_adv_stop();
-
-        struct bt_conn *conn = zmk_ble_active_profile_conn();
-
-        if (conn != NULL) {
-            (void)bt_conn_disconnect(conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
-            bt_conn_unref(conn);
-        }
+        want = ZMK_TRANSPORT_USB;
     } else {
         /* Prefer a ready USB host; keep BLE selected for charge-only sources. */
-        (void)zmk_endpoint_set_preferred_transport(
-            usb_host_ready() ? ZMK_TRANSPORT_USB : ZMK_TRANSPORT_BLE);
+        want = usb_host_ready() ? ZMK_TRANSPORT_USB : ZMK_TRANSPORT_BLE;
+    }
+
+    if ((int)want != last_want) {
+        (void)zmk_endpoint_set_preferred_transport(want);
+        last_want = (int)want;
     }
 #endif
 
     k_work_schedule(&mode_gate, K_SECONDS(1));
 }
 
+void g4b_mode_set_override(int mode)
+{
+    if (mode < G4B_MODE_BT || mode > G4B_MODE_DONGLE) {
+        mode_override = -1;
+        mode_retain.magic = 0u;
+    } else {
+        mode_override = (int8_t)mode;
+        mode_retain.magic = G4B_MODE_RETAIN_MAGIC;
+        mode_retain.mode = (int8_t)mode;
+    }
+    /* Apply the new transport policy now instead of waiting up to a second (and,
+     * in radio builds, trigger the radio-owner reset from mode_gate_work). */
+    k_work_reschedule(&mode_gate, K_NO_WAIT);
+}
+
+int g4b_mode_get_override(void)
+{
+    return mode_override;
+}
+
 static int g4b_mode_init(void)
 {
     /* Sample before the watchdog module initializes at APPLICATION 98. */
     g4b_mode_sample();
+
+    /* Restore a persisted override BEFORE latching radio ownership, so a forced
+     * dongle/non-dongle survives the reset that reassigns the radio. */
+    if (mode_retain.magic == G4B_MODE_RETAIN_MAGIC &&
+        mode_retain.mode >= G4B_MODE_BT && mode_retain.mode <= G4B_MODE_DONGLE) {
+        mode_override = mode_retain.mode;
+    }
 
     /* Latch the boot position for radio ownership and change detection. */
     boot_is_dongle = (g4b_mode_get() == G4B_MODE_DONGLE);

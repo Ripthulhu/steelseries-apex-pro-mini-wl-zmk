@@ -3,6 +3,8 @@
 #define APEX_G4B_ACTUATION_H
 
 #include <stdint.h>
+#include <stddef.h>
+#include <stdbool.h>
 
 /* Runtime actuation and rapid-trigger controls, for the keymap.
  *
@@ -55,5 +57,41 @@ void g4b_settings_mark_dirty(void);
 
 uint8_t g4b_actuation_tenths(void);
 uint8_t g4b_rapid_trigger_tenths(void);
+
+/* --- diagnostics for the apex shell (implemented in link_g4b.c) ------------ */
+
+/* STM32 scanner-link health counters. */
+struct g4b_link_stats {
+    uint32_t frames_run;      /* boot handshake: scanner frames issued */
+    uint32_t frames_matched;  /* boot handshake: frames whose reply validated */
+    uint32_t ingest_calls;    /* boot probe: bitmaps handed to ZMK's kscan */
+    uint32_t ingest_ok;       /* boot probe: those it accepted */
+    /* Live counters from the permanent scan loop (s3_run_keyboard). The four
+     * above are one-shot boot snapshots and never move once the keyboard loop
+     * takes over - watch these to see the scanner working in real time. */
+    uint32_t live_key_events; /* accepted key state changes (climbs as you type) */
+    uint32_t live_keepalives; /* idle 0xA0 keep-alive polls between events */
+};
+void g4b_link_stats_get(struct g4b_link_stats *out);
+
+/* Filtered per-key Hall travel, raw ADC (~337 released .. ~3959 pressed;
+ * 0 = not sampled yet). Only fresh while analog sampling runs; g4b_depth_force()
+ * makes the link thread sample 0xA2 even without an analog RGB effect selected.
+ * RGB builds only. Returns the true slot count regardless of @max. */
+size_t g4b_depth_read(uint16_t *out, size_t max);
+void   g4b_depth_force(bool on);
+
+/* Shell-requested component resets/power, serviced on the g4b thread at its
+ * single-writer-safe point. The caller (shell) only raises the request. */
+void g4b_request_stm32_reset(void);   /* pulse STM32 EN low/high (scanner reboot) */
+void g4b_request_rgb_reset(void);     /* RGB rail cycle + IS31 re-init */
+void g4b_request_rgb_rail(bool on);   /* RGB rail power up(+init)/down */
+void g4b_request_usb_rail_reset(void);/* pulse USB rail P0.25 (re-enumerate; always restores) */
+
+/* Debug: send one raw 64-byte frame to the STM32 scanner and read its 64-byte
+ * reply (into a caller buffer of at least 64 bytes). Runs the exchange on the
+ * g4b thread at the single-writer-safe point. Returns 0 on a clean exchange.
+ * Callers MUST NOT send the damaging opcodes 0x01/0x02/0x32. */
+int g4b_scan_raw(const uint8_t *tx, uint32_t len, uint8_t *rx, uint32_t timeout_ms);
 
 #endif /* APEX_G4B_ACTUATION_H */

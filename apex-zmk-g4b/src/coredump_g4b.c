@@ -193,6 +193,17 @@ static int g4b_coredump_scan(void)
 
 SYS_INIT(g4b_coredump_scan, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);
 
+/* Copy the newest stored crash record (retained in RAM by the boot scan) for the
+ * apex shell (`apex crash`). Returns false when no valid record exists. */
+bool g4b_coredump_read_last(struct g4b_coredump_record *out)
+{
+    if (!g4b_cd_have_last || out == NULL) {
+        return false;
+    }
+    *out = g4b_cd_last;
+    return true;
+}
+
 /* Emit the newest record as ASCII hex over the configured evidence channels. */
 #if IS_ENABLED(CONFIG_APEX_G4B_UART_EVIDENCE) && \
     (IS_ENABLED(CONFIG_APEX_G4B_UART_EMIT) || \

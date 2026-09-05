@@ -947,6 +947,21 @@ config APEX_G4B_ESB
 	  register config and reports a read-back over the evidence UART; TX/RX and
 	  the pairing state machine build on top. See src/radio_esb_g4b.c.
 
+config APEX_G4B_DONGLE_LINK
+	bool "Operational (post-pairing) CCM link to the SteelSeries receiver"
+	default n
+	depends on APEX_G4B_ESB
+	help
+	  Compiles src/dongle_link_g4b.c, the operational 2.4GHz link that carries
+	  key reports after the receiver has bonded. It reuses the ESB PHY and TX/RX
+	  primitives (APEX_G4B_ESB) and assumes an existing bond, going straight to
+	  the receiver's clear A0/90/90 slot-counter exchange and the CCM-encrypted
+	  class-B0 type-2 handoff. When enabled, the STM32 scanner keeps running in
+	  the dongle position and its absolute key bitmaps are queued for the radio.
+	  SCAFFOLD: the microsecond TX->RX turnaround (stock TIMER2+PPI) and the exact
+	  CCM packing are not yet proven. Release firmware leaves it disabled. See
+	  src/dongle_link_g4b.c and work/DONGLE_RE_2026-09-04.md.
+
 config APEX_G4B_SPINOR_FLASHDEV
 	bool "Expose the external SPI-NOR as a Zephyr flash device (ZMK storage)"
 	default n
@@ -1046,3 +1061,14 @@ config APEX_G4B_SPINOR
 	  write self-test, the self-flash writer, and the crash-ring backing all
 	  share. Kept separate so more than one of them can be enabled without
 	  double-adding the source.
+
+config APEX_G4B_SHELL
+	bool "Debug: apex UART shell + logging over a USB CDC-ACM port"
+	default n
+	help
+	  Opt-in debug/observability build. Compiles src/apex_control_g4b.c and the
+	  `apex ...` shell commands (src/apex_shell_g4b.c) over a dedicated shell
+	  CDC-ACM port, alongside CONFIG_SHELL/CONFIG_LOG. NOT part of the release
+	  image: it adds RAM/flash and can perturb the scanner/radio timing. Enabled
+	  via build_g4b.py --shell (which also defines APEX_G4B_SHELL_DTS to add the
+	  shell CDC port in g4b_usb.overlay).
