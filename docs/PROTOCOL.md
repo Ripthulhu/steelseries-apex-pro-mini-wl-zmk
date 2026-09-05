@@ -73,7 +73,7 @@ The 59 frames are two near-identical programming passes bracketing the enable:
 | 9 | `0x34` | Table boundary / commit marker |
 | 10–12 | `0x35` ×3 | Per-key rapid-trigger sensitivity (chunked over the 70 keys) |
 | 13–24 | `0x36` ×12 | Per-key **neighbour-adjacency graph**: a 9-byte, `0xFF`-terminated list of each key's grid neighbours (6 keys/frame). Written to `SB+0x4d7+key*9`; two readers (`~0x08007cf4` set / `~0x08007b40` clear) build a live neighbour graph the scanner uses for **neighbour-aware key filtering** (rollover / adjacent-key resolution). It is **logical adjacency, not crosstalk** — measured on hardware, pressing a key shifts *zero* neighbour Hall readings (`apex halldump` diff). |
-| 25–28 | `0x37` ×4 | Per-key table, stride-20 (`37 14 <idx> 14`, idx 0,20,40,60) — semantics unconfirmed |
+| 25–28 | `0x37` ×4 | Per-key **signed actuation trim** + enable bit (`37 <count> [idx, val, flag]…`). The `val` byte is stored at `SB+0x491+key` and the enable bit in the `SB+0x488` bitmap; at scan time (`~0x08007984`) it is read `sxtb` (signed) and, if the key's enable bit is set, **added as an offset into the actuation travel calc** (`0x0800d3e0` table). Stock ships a uniform `0x14` (+20) with every key enabled — a fine per-key offset on top of the global `0x30`/`0x33` threshold. |
 | 29 | `0x38 f4 01` | Scan timing/rate = `0x01F4` (500) |
 | 30 | `0x20 01 01` | Scanner state/enable → replies `20 00` |
 | 31–57 | (repeat 3–29) | Second pass; the `0x30`/`0x33` frames carry a `0x20` marker in byte 3 |
