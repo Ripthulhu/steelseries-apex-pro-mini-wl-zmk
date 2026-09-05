@@ -2,8 +2,8 @@ diff --git a/src/usb/uf2/ghostfat.c b/src/usb/uf2/ghostfat.c
 index 97753ef..1d0f773 100644
 --- a/src/usb/uf2/ghostfat.c
 +++ b/src/usb/uf2/ghostfat.c
-@@ -438,8 +438,21 @@ int write_block (uint32_t block_no, uint8_t *data, WriteState *state)
-        */
+@@ -438,8 +438,25 @@ int write_block (uint32_t block_no, uint8_t *data, WriteState *state)
+       */
        if ( in_app_space(bl->targetAddr) )
        {
 -        PRINTF("Write addr = 0x%08lX, block = %ld (%ld of %ld)\r\n", bl->targetAddr, bl->blockNo, state->numWritten, bl->numBlocks);
@@ -22,6 +22,10 @@ index 97753ef..1d0f773 100644
 +        {
 +          PRINTF("Write addr = 0x%08lX, block = %ld (%ld of %ld)\r\n", bl->targetAddr, bl->blockNo, state->numWritten, bl->numBlocks);
 +          flash_nrf5x_write(bl->targetAddr, bl->data, bl->payloadSize, true);
++          /* Apex: advance the red left->right write bar on the key RGB. Symbol
++           * lives in the board's pinconfig.c (BOARD_HAS_RGB_DFU). */
++          extern void board_rgb_progress(uint32_t num, uint32_t den);
++          board_rgb_progress(bl->blockNo + 1u, bl->numBlocks);
 +        }
        }else if ( bl->targetAddr < USER_FLASH_START )
        {

@@ -101,8 +101,8 @@
   "patches": {
     "apex-zmk-g4b/patches/0001-usb_dc_nrfx-synthesise-USBPWRRDY.patch": "0fecb7003c4f0fa3354a6b8af98b8c7a5c4bbd75aaf8935d727b58fde9bcb29e",
     "apex-zmk-g4b/patches/0002-zmk-usb-device-next-migration.patch": "3473e9a6ca5d8ee9605e95167486a74de88edfe472cb33013a0ef01bf211c145",
-    "bootloader/patches/0001-anti-brick-uf2-app-floor.patch": "ceffc8c64417b753bbdddd7435f029363f1ab377fbbc5569f2fd763154d279e4",
-    "bootloader/patches/0002-rgb-dfu-indicator-hook.patch": "7cd9dac5f9a21fda27d91677655ddf0d35c930eeb2dcc03db6a3c2eec8687cc7",
+    "bootloader/patches/0001-anti-brick-uf2-app-floor.patch": "1713332620a46bbcff9339e7d57e6fd34ff74f4fd3ef6cbebefb1929e180dc50",
+    "bootloader/patches/0002-rgb-dfu-indicator-hook.patch": "07bee53af42c39dfa003cb36ee9c8b3299d09a6c761c4bc4bd1394b58841d063",
     "bootloader/patches/0003-zephyr-sdk-arm-toolchain.patch": "6ed85a6b93eec2eaf7815a6cea8b6480ba8c015024ab9af5700fa165c96838d4",
     "bootloader/patches/0004-cpsid-before-app-jump.patch": "fee9336265a740fe211ca406585cb295244117cb22492c4297f053533b8b2cfb",
     "bootloader/patches/0005-ab-rollback-promote.patch": "3b90acef961b165e8fcfedd83e71dd79c8d16f67eb116ba5c79ce281a87ecd70",

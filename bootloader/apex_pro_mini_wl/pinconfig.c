@@ -124,12 +124,19 @@ static void apex_rgb_init(void)
 
   apex_rgb_func(0x02u, 0x33u); /* PULL   */
   apex_rgb_func(0x00u, 0x09u); /* CONFIG = normal run */
-  apex_rgb_func(0x01u, 0x40u); /* GLOBAL CURRENT ~1/4 */
+  apex_rgb_func(0x01u, 0xFFu); /* GLOBAL CURRENT = max (100% brightness) */
 
   apex_rgb_ready = true;
 }
 
-/* Called for DFU states. rgb is 0xRRGGBB; the device register order is B,G,R. */
+/* Shared DFU-indicator state (used by the flood, the breathe and the write bar). */
+static volatile bool apex_dfu_idle = false; /* breathe armed (set on USB mount) */
+static volatile bool apex_rgb_lock = false; /* guards SPIM2/frame vs the led_tick ISR */
+static uint32_t apex_dfu_last_ms = 0u;
+
+/* Flood every key one colour. rgb is 0xRRGGBB; device register order is B,G,R.
+ * Used for the green success flash and the dark-on-eject state, so it disarms the
+ * idle breathe (see board_rgb_dfu_glyph). */
 void board_rgb_dfu(uint32_t rgb)
 {
   uint8_t r = ((rgb >> 16) & 0xFFu) ? 0xFFu : 0u;
@@ -137,6 +144,7 @@ void board_rgb_dfu(uint32_t rgb)
   uint8_t b = ((rgb >>  0) & 0xFFu) ? 0xFFu : 0u;
 
   if (!apex_rgb_ready) apex_rgb_init();
+  apex_dfu_idle = false;
 
   apex_rgb_frame[0] = APEX_RGB_CMD_PWM;
   apex_rgb_frame[1] = 0x01u;
@@ -145,6 +153,141 @@ void board_rgb_dfu(uint32_t rgb)
     px[0] = b; px[1] = g; px[2] = r;
   }
   apex_spim2_write(apex_rgb_frame, 2u + APEX_RGB_CHANNELS);
+}
+
+/*------------------------------------------------------------------*/
+/* DFU visuals: a breathing red idle background with green D/F/U keys, and a
+ * left->right red write bar. Both compose on the per-LED framebuffer (order
+ * B,G,R). Geometry comes from the app's rgb_map_g4b.c: g4b_led_x is each LED's
+ * horizontal position 0..255, so the bar fill is a pure x threshold.
+ *------------------------------------------------------------------*/
+
+/* LED index -> horizontal position (0 = left edge .. 255 = right edge). Mirror
+ * of g4b_led_x[] in the application's rgb_map_g4b.c. */
+static const uint8_t apex_led_x[APEX_RGB_LEDS] = {
+    0u,   0u,   0u,   0u,   0u,   208u, 19u,  28u,  33u,  28u,  24u,
+    227u, 38u,  47u,  52u,  42u,  47u,  231u, 57u,  66u,  71u,  61u,
+    123u, 246u, 76u,  85u,  90u,  80u,  71u,  217u, 94u,  104u, 109u,
+    99u,  71u,  236u, 113u, 123u, 128u, 118u, 198u, 255u, 132u, 142u,
+    146u, 137u, 222u, 222u, 151u, 161u, 165u, 156u, 234u, 241u, 170u,
+    179u, 184u, 175u, 246u, 250u, 189u, 198u, 203u, 194u, 212u, 246u,
+};
+/* NB: LED 52 (the Fn / SteelSeries key) is corrected to 234 here (stock g4b_led_x
+ * has it at 175, which is physically wrong - it sits between the right GUI and
+ * right Ctrl, not just past the spacebar). Without this the left->right write bar
+ * lit Fn ~40 units too early, leaving a 2-key gap to the spacebar. Bootloader-only;
+ * the app's rgb_map is untouched. */
+
+/* DFU idle indicator: a breathing red background across every key with the three
+ * D, F and U keycaps held solid green on top - their printed legends read "DFU".
+ * (Block-letter glyphs drawn across the keys were tried and are illegible on the
+ * staggered layout.) The breathe is animated from led_tick() (SysTick, lowest IRQ
+ * priority, so its short SPIM write cannot stall USB). board_rgb_dfu_glyph() arms
+ * it; every one-shot writer (bar, flood) disarms it. LED indices from g4b_led_hid[]
+ * in the app's rgb_map_g4b.c: D=usage 0x07->20, F=0x09->26, U=0x18->43. */
+#define APEX_DFU_KEY_D      20u
+#define APEX_DFU_KEY_F      26u
+#define APEX_DFU_KEY_U      43u
+#define APEX_DFU_BREATHE_MS 2600u /* full fade-in + fade-out period */
+#define APEX_DFU_RED_MIN    6u
+#define APEX_DFU_RED_MAX    255u
+
+static void apex_rgb_begin(void)
+{
+  apex_rgb_frame[0] = APEX_RGB_CMD_PWM;
+  apex_rgb_frame[1] = 0x01u;
+  memset(&apex_rgb_frame[2], 0u, APEX_RGB_CHANNELS);
+}
+
+static void apex_rgb_set(uint8_t led, uint8_t r, uint8_t g, uint8_t b)
+{
+  if (led >= APEX_RGB_LEDS) return;
+  uint8_t *px = &apex_rgb_frame[2u + (uint32_t)led * 3u];
+  px[0] = b; px[1] = g; px[2] = r; /* device order B,G,R */
+}
+
+/* One breathe frame: every key red at `red`, D/F/U solid green over the top. */
+static void apex_dfu_draw(uint8_t red)
+{
+  apex_rgb_begin();
+  for (uint32_t i = 0u; i < APEX_RGB_LEDS; i++) apex_rgb_set((uint8_t)i, red, 0u, 0u);
+  apex_rgb_set(APEX_DFU_KEY_D, 0u, 0xFFu, 0u);
+  apex_rgb_set(APEX_DFU_KEY_F, 0u, 0xFFu, 0u);
+  apex_rgb_set(APEX_DFU_KEY_U, 0u, 0xFFu, 0u);
+  apex_spim2_write(apex_rgb_frame, 2u + APEX_RGB_CHANNELS);
+}
+
+/* Arm the breathing DFU idle indicator (from led_state on USB mount). The rgb
+ * argument is ignored - the colours are fixed (red breathe + green D/F/U). */
+void board_rgb_dfu_glyph(uint32_t rgb)
+{
+  (void)rgb;
+  if (!apex_rgb_ready) apex_rgb_init();
+  apex_rgb_lock = true;
+  apex_dfu_draw(APEX_DFU_RED_MIN);
+  apex_rgb_lock = false;
+  apex_dfu_last_ms = 0u;
+  apex_dfu_idle = true;
+}
+
+/* Animate the breathe; called every ms from led_tick() (SysTick ISR). Throttled
+ * to ~30 fps and a no-op unless the idle indicator is armed. */
+void board_rgb_dfu_tick(uint32_t millis)
+{
+  if (!apex_dfu_idle || apex_rgb_lock || !apex_rgb_ready) return;
+  if ((uint32_t)(millis - apex_dfu_last_ms) < 33u) return;
+  apex_dfu_last_ms = millis;
+
+  uint32_t phase = millis % APEX_DFU_BREATHE_MS;
+  uint32_t half = APEX_DFU_BREATHE_MS / 2u;
+  uint32_t tri = (phase < half) ? phase : (APEX_DFU_BREATHE_MS - phase); /* 0..half */
+  uint32_t red = APEX_DFU_RED_MIN + (tri * (APEX_DFU_RED_MAX - APEX_DFU_RED_MIN)) / half;
+
+  apex_rgb_lock = true;
+  apex_dfu_draw((uint8_t)red);
+  apex_rgb_lock = false;
+}
+
+/* Write progress: red bar filling left->right as num/den advances; a full green
+ * board when complete. Called once per written block, throttled to redraw only
+ * when the 8-bit fill level changes. Disarms the idle breathe. */
+void board_rgb_progress(uint32_t num, uint32_t den)
+{
+  static uint8_t last_level = 0xFEu; /* != any first level, forces one draw */
+  uint32_t level;
+
+  apex_dfu_idle = false; /* stop the breathe; the bar owns the frame now */
+
+  if (den == 0u) {
+    level = 0u;
+  } else if (num >= den) {
+    level = 255u;
+  } else {
+    level = (num * 255u) / den;
+  }
+
+  if ((uint8_t)level == last_level) return;
+  last_level = (uint8_t)level;
+
+  if (!apex_rgb_ready) apex_rgb_init();
+
+  apex_rgb_lock = true;
+  apex_rgb_begin();
+  if (level >= 255u) {
+    for (uint32_t i = 0u; i < APEX_RGB_LEDS; i++) apex_rgb_set((uint8_t)i, 0u, 0xFFu, 0u);
+  } else {
+    for (uint32_t i = 0u; i < APEX_RGB_LEDS; i++) {
+      if (apex_led_x[i] <= (uint8_t)level) apex_rgb_set((uint8_t)i, 0xFFu, 0u, 0u);
+    }
+  }
+  apex_spim2_write(apex_rgb_frame, 2u + APEX_RGB_CHANNELS);
+  if (level >= 255u) {
+    /* Hold the all-green success flash ~1 s so it is actually visible - the UF2
+     * write completes and the board resets into the new firmware immediately
+     * otherwise, leaving green on screen for only a few ms. */
+    NRFX_DELAY_MS(1000);
+  }
+  apex_rgb_lock = false;
 }
 #endif /* BOARD_HAS_RGB_DFU */
 

@@ -2,20 +2,37 @@ diff --git a/src/boards/boards.c b/src/boards/boards.c
 index c02a278..0465c92 100644
 --- a/src/boards/boards.c
 +++ b/src/boards/boards.c
-@@ -466,6 +466,19 @@ void led_state(uint32_t state) {
+@@ -379,4 +379,10 @@ static uint32_t secondary_cycle_length;
+ void led_tick(void) {
++#ifdef BOARD_HAS_RGB_DFU
++  /* Apex: animate the breathing DFU idle indicator on the key RGB. SysTick is
++   * the lowest IRQ priority, so its short SPIM write cannot stall USB. */
++  extern void board_rgb_dfu_tick(uint32_t millis);
++  board_rgb_dfu_tick(_systick_count);
++#endif
+   uint32_t millis = _systick_count;
+
+   uint32_t cycle = millis % primary_cycle_length;
+@@ -466,6 +466,25 @@ void led_state(uint32_t state) {
      final_color = (uint8_t*) &rgb_color;
    }
- 
+
 +#ifdef BOARD_HAS_RGB_DFU
 +  /* Apex: mirror the DFU state onto the per-key RGB matrix (the only visible LED
-+   * on this board). Restricted to the states that mean "actually in DFU" so a
-+   * normal boot - which fires STATE_BOOTLOADER_STARTED then jumps to the app -
-+   * stays dark. green = DFU drive mounted, red = writing / unmounted. */
-+  if ( state == STATE_USB_MOUNTED || state == STATE_WRITING_STARTED ||
-+       state == STATE_WRITING_FINISHED || state == STATE_USB_UNMOUNTED )
-+  {
++   * on this board). Idle shows a breathing red field with the D/F/U keys green;
++   * the red left->right write bar is driven from the UF2 write path (ghostfat.c),
++   * which also flips the whole board to green on the final block. Restricted to
++   * real-DFU states so a normal boot - which fires STATE_BOOTLOADER_STARTED then
++   * jumps to the app - stays dark. */
++  if ( state == STATE_USB_MOUNTED ) {
++    extern void board_rgb_dfu_glyph(uint32_t rgb);
++    board_rgb_dfu_glyph(0x00FF00u);          /* arm breathing red + green D/F/U */
++  } else if ( state == STATE_WRITING_FINISHED ) {
 +    extern void board_rgb_dfu(uint32_t rgb);
-+    board_rgb_dfu( (temp_color != 0) ? temp_color : rgb_color );
++    board_rgb_dfu(0x00FF00u);                /* success: whole board green */
++  } else if ( state == STATE_USB_UNMOUNTED ) {
++    extern void board_rgb_dfu(uint32_t rgb);
++    board_rgb_dfu(0x000000u);                /* drive ejected: go dark */
 +  }
 +#endif
 +

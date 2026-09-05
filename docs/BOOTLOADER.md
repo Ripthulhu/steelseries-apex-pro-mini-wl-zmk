@@ -73,10 +73,30 @@ These entry methods have been tested on the first-generation board. See
 | **Double-tap reset** | Briefly short CN3 `RESET` to `GND` twice |
 | **SWD** | `mww 0x4000051C 0x57` then reset (see below) |
 
-While the board is in DFU, the per-key RGB lights up as a visual indicator —
-**green** once the `APEXBOOT` drive mounts, **red** while an image is being
-written — since the board has no other usable LED. A normal boot stays dark.
-The UF2 application floor and self-update handling are documented in
+While the board is in DFU, the per-key RGB matrix is the only usable indicator
+(there is no discrete LED), so it shows DFU state directly:
+
+- **Idle (drive mounted):** a **breathing red background** across every key with
+  the **`D`, `F`, `U` keycaps held solid green** on top — their printed legends
+  read "DFU". The breathe is animated from `led_tick()` (the SysTick handler, the
+  lowest IRQ priority, so its short SPIM write cannot stall USB); `board_rgb_dfu_tick()`
+  redraws at ~30 fps over a 2.6 s fade period. (Block-letter glyphs drawn across
+  the keys were tried first and are illegible — the staggered layout and the caps'
+  own legends break the letterforms.)
+- **Writing:** a **red bar fills left→right** across the whole board, tracking the
+  UF2 write progress (each written block advances the fill by the LED's horizontal
+  position; see `apex_led_x[]` in `pinconfig.c`, mirrored from `rgb_map_g4b.c`).
+- **Done:** the **whole board turns green** on the final block (and on
+  `STATE_WRITING_FINISHED`) to signal success before the app boots.
+- **Drive ejected / normal boot:** dark.
+
+Global LED current is set to max (`0xFF`) for full brightness. The state hook is in
+`boards.c` (`led_state` arms the breathe, `led_tick` animates it — patch 0002) plus
+the write-path call in `ghostfat.c` (patch 0001); the drawing primitives
+(`board_rgb_dfu_glyph`, `board_rgb_dfu_tick`, `board_rgb_progress`) live in
+`bootloader/apex_pro_mini_wl/pinconfig.c`. A single-writer lock guards the shared
+framebuffer/SPIM2 between the `led_tick` ISR and the one-shot writers. The UF2
+application floor and self-update handling are documented in
 [bootloader/README.md](../bootloader/README.md#local-changes).
 
 `INFO_UF2.TXT` on the drive includes the last reset cause, the A/B recovery
