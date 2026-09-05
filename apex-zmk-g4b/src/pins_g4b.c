@@ -305,6 +305,22 @@ void g4b_rgb_rail_down(void)
     __DSB();
 }
 
+/* USB data-path rail on P0.25. Stock drives it high at bring-up and holds it
+ * high through light sleep; pulsing it low then high forces a USB
+ * re-enumeration. Restored to high in this one call - never left low, or USB
+ * drops until a power cycle. Only the level is touched; the pin is already an
+ * output. Caller runs on the g4b thread. */
+#define G4B_RAIL_USB 25u
+
+void g4b_usb_rail_pulse(uint32_t low_ms)
+{
+    NRF_P0->OUTCLR = BIT(G4B_RAIL_USB);
+    __DSB();
+    k_msleep(low_ms);
+    NRF_P0->OUTSET = BIT(G4B_RAIL_USB);
+    __DSB();
+}
+
 /* RGB chip-select on P0.11.
  *
  * The IS31FL3743B hangs off SPIM2 (SCK P1.09, MOSI P1.08) with its hardware

@@ -610,10 +610,9 @@ static void s3_service_shell_requests(void)
         s3_req_usb_reset = 0u;
         /* Pulse the USB data-path rail (P0.25) low then high to force a USB
          * re-enumeration. It is ALWAYS restored in this same operation - never
-         * left low, or USB (and this shell) would be gone until a power cycle. */
-        NRF_P0->OUTCLR = BIT(25);
-        k_msleep(150);
-        NRF_P0->OUTSET = BIT(25);
+         * left low, or USB (and this shell) would be gone until a power cycle.
+         * The register access lives in pins_g4b.c, the sole GPIO-register owner. */
+        g4b_usb_rail_pulse(150);
     }
     if (s3_req_raw_pending) {
         /* One raw 64-byte scanner exchange for the shell. Safe here: ATTN is low so

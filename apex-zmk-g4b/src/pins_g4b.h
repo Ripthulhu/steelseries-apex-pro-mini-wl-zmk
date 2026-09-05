@@ -126,6 +126,10 @@ bool g4b_strap_asserted(void);
 void g4b_rgb_rail_up(void);
 void g4b_rgb_rail_down(void);
 
+/* Pulse the USB data-path rail (P0.25) low for low_ms then high, forcing a USB
+ * re-enumeration. Always restored to high within the call. g4b thread only. */
+void g4b_usb_rail_pulse(uint32_t low_ms);
+
 void g4b_pin_survey(uint32_t p0_mask, uint32_t p1_mask,
                     uint32_t *p0_up, uint32_t *p1_up,
                     uint32_t *p0_down, uint32_t *p1_down);
