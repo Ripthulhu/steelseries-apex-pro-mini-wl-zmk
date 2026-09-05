@@ -190,11 +190,11 @@ workspace, not this repo:**
 
 | Where | Change |
 |---|---|
-| `work/zmk-upstream/modules/msgs/zmk-studio-messages/proto/zmk/apex.proto` | NEW — apex Request/Response + `Heatmap` (usage heatmap) + `Status` (battery mV/%/charging, battery °C, die °C). Requests: `apex_get_heatmap`, `apex_reset_heatmap`, `apex_get_status`. |
-| …/`proto/zmk/apex.options.in` | NEW — `zmk.apex.Heatmap.counts max_count:128` (nanopb) |
+| `work/zmk-upstream/modules/msgs/zmk-studio-messages/proto/zmk/apex.proto` | NEW — apex Request/Response + `Heatmap` (usage heatmap) + `Status` (battery mV/%/charging, battery °C, die °C) + `Actuation` (`global_tenths` + `repeated per_key_tenths`) + `SetKeyActuation` (`{key, tenths}`). Requests: `apex_get_heatmap`, `apex_reset_heatmap`, `apex_get_status`, `apex_get_actuation`, `apex_set_key_actuation`. |
+| …/`proto/zmk/apex.options.in` | NEW — `zmk.apex.Heatmap.counts max_count:128` and `zmk.apex.Actuation.per_key_tenths max_count:70` (nanopb) |
 | …/`proto/zmk/studio.proto` | added `import "apex.proto"` + `zmk.apex.Request apex = 6;` (Request) + `zmk.apex.Response apex = 6;` (RequestResponse) |
 | `work/zmk-upstream/app/CMakeLists.txt` | added `apex.proto` to the `nanopb_generate_cpp(...)` list (~line 128) |
-| `repo/apex-zmk-g4b/src/studio_apex_g4b.c` | NEW — `ZMK_RPC_SUBSYSTEM(apex)` + `apex_get_heatmap` / `apex_reset_heatmap` handlers |
+| `repo/apex-zmk-g4b/src/studio_apex_g4b.c` | NEW — `ZMK_RPC_SUBSYSTEM(apex)` + `apex_get_heatmap` / `apex_reset_heatmap` / `apex_get_status` / `apex_get_actuation` / `apex_set_key_actuation` handlers |
 | `repo/apex-zmk-g4b/CMakeLists.txt` | compiles `studio_apex_g4b.c` + adds `${CMAKE_BINARY_DIR}` so the module sees the generated `proto/zmk/*.pb.h` |
 | `repo/apex-zmk-g4b/g4b_shell.conf` | `CONFIG_ZMK_STUDIO_RPC_TX_BUF_SIZE=1024` (stock 64 truncates the 128-count response) |
 

@@ -15,6 +15,8 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #include <zmk/studio/rpc.h>
 
 #include "apex_control_g4b.h"
+#include "actuation_g4b.h" /* per-key actuation API */
+#include "kscan_g4b.h"     /* APEX_G4B_KEY_COUNT */
 
 ZMK_RPC_SUBSYSTEM(apex)
 
@@ -72,8 +74,34 @@ zmk_studio_Response apex_get_status(const zmk_studio_Request *req)
     return APEX_RESPONSE(apex_get_status, st);
 }
 
+zmk_studio_Response apex_get_actuation(const zmk_studio_Request *req)
+{
+    ARG_UNUSED(req);
+    zmk_apex_Actuation act = zmk_apex_Actuation_init_zero;
+
+    act.global_tenths = apex_actuation_get_tenths();
+    act.per_key_tenths_count = (pb_size_t)APEX_G4B_KEY_COUNT;
+    for (uint32_t k = 0u; k < APEX_G4B_KEY_COUNT; k++) {
+        /* 0 where the key follows the global point, else its override depth. */
+        act.per_key_tenths[k] = g4b_act_key_is_override(k) ? g4b_act_key_tenths(k) : 0u;
+    }
+
+    return APEX_RESPONSE(apex_get_actuation, act);
+}
+
+zmk_studio_Response apex_set_key_actuation(const zmk_studio_Request *req)
+{
+    const zmk_apex_SetKeyActuation *s =
+        &req->subsystem.apex.request_type.apex_set_key_actuation;
+    bool ok = (g4b_act_key_set(s->key, (uint8_t)s->tenths) == 0);
+
+    return APEX_RESPONSE(apex_set_key_actuation, ok);
+}
+
 ZMK_RPC_SUBSYSTEM_HANDLER(apex, apex_get_heatmap, ZMK_STUDIO_RPC_HANDLER_UNSECURED);
 ZMK_RPC_SUBSYSTEM_HANDLER(apex, apex_reset_heatmap, ZMK_STUDIO_RPC_HANDLER_UNSECURED);
 ZMK_RPC_SUBSYSTEM_HANDLER(apex, apex_get_status, ZMK_STUDIO_RPC_HANDLER_UNSECURED);
+ZMK_RPC_SUBSYSTEM_HANDLER(apex, apex_get_actuation, ZMK_STUDIO_RPC_HANDLER_UNSECURED);
+ZMK_RPC_SUBSYSTEM_HANDLER(apex, apex_set_key_actuation, ZMK_STUDIO_RPC_HANDLER_UNSECURED);
 
 #endif /* CONFIG_ZMK_STUDIO */
