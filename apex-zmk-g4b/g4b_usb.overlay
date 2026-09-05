@@ -14,7 +14,7 @@
 
 /* The production board has the nRF52833 DC/DC inductor populated: stock was
  * captured with POWER.DCDCEN=1 on this exact hardware.  A system reset clears
- * that bit, and the old overlay left reg1 in its default LDO mode, so our app
+ * that bit, and the old overlay left reg1 in its default LDO mode, so the app
  * repeatedly measured DCDCEN=0.  Describe the real board wiring to Zephyr so
  * its PRE_KERNEL SoC init restores the efficient regulator mode every boot.
  * This is electrically transparent to the USB path; the battery-life benefit
@@ -195,7 +195,7 @@
 
 /* Adafruit_nRF52_Bootloader layout, SoftDevice-free: app at 0x1000 (right above
  * the MBR), a ~452 KB slot. The s140 region (0x1000-0x27000) was reclaimed once
- * we confirmed the app never uses the SD - see docs/FLASH_MEMORY_MAP.md. */
+ * the app was confirmed never to use the SD - see docs/FLASH_MEMORY_MAP.md. */
 &code_partition {
     reg = <0x00001000 0x00071000>;
 };

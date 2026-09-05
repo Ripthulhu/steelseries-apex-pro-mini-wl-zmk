@@ -16,7 +16,7 @@ enum g4b_fx {
     G4B_FX_AURORA,    /* slow drifting hue bands */
     G4B_FX_SPARKLE,   /* decaying starfield over a dim base */
     G4B_FX_RIPPLE,    /* rings expanding across the real board geometry */
-    G4B_FX_REACTIVE,  /* keys flare and fade as you type */
+    G4B_FX_REACTIVE,  /* keys flare and fade on press */
     G4B_FX_ANALOG,    /* brightness follows how far each key is pressed */
     G4B_FX_SHOCKWAVE, /* every key press launches a coloured spatial ring */
     G4B_FX_HEATMAP,   /* no background: dark at rest, green->red with depth */
@@ -35,7 +35,7 @@ enum g4b_fx {
  * an LED.
  *
  * g4b_fx_key: a key crossed its actuation threshold. Seeds the selected
- * event-driven effect at its LED, driven from the bitmap we already ingest, so
+ * event-driven effect at its LED, driven from the already-ingested bitmap, so
  * it costs no extra scanner traffic. Called from the ingest path on the g4b
  * thread.
  *

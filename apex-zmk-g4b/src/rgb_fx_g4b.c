@@ -52,7 +52,7 @@ static volatile uint8_t fx_live[G4B_RGB_LEDS];
 
 /* Four overlapping event-driven rings are enough to preserve rapid chords
  * without an O(keys^2) history. Radius is 16-bit because the approximate
- * corner-to-corner distance is greater than 255 in our 0..255 geometry.
+ * corner-to-corner distance is greater than 255 in the 0..255 geometry.
  */
 #define G4B_FX_WAVES 4u
 struct fx_wave {
@@ -82,9 +82,9 @@ static bool fx_rain_ready;
  * covers part of 0..255 and each key idles at a different value, so a fixed
  * mapping sat at green and never reached red. Instead learn each key's resting
  * depth (running min) and its deepest press (running max), and map between
- * them - so the hardest you press a key reads red and lighter reads green,
+ * them - so the hardest press reads red and a lighter press reads green,
  * whatever the real range turns out to be. lo primes high / hi primes low so
- * the first real samples pull them to the truth.
+ * the first real samples pull them to the true range.
  *
  * seen guards the baseline against the memset(fx_live, 0) done on entry: until
  * a key has had a real 0xA2 reading its live value is a placeholder 0, and if
@@ -256,7 +256,7 @@ static uint8_t fx_dither(uint32_t idx, uint16_t value_q4)
 }
 
 /* Global brightness, 0..255, refreshed each frame from ZMK's underglow state so
- * the Fn brightness keys (RGB_BRI/RGB_BRD) drive our effects too. Without this
+ * the Fn brightness keys (RGB_BRI/RGB_BRD) drive the effects too. Without this
  * the effects rendered at a fixed level and the brightness control did nothing -
  * which also made them look dim, because a low persisted brightness could not be
  * turned back up. CONFIG_ZMK_RGB_UNDERGLOW_BRT_MAX remains the hard output cap,
@@ -452,8 +452,8 @@ static void fx_render_sparkle(void)
 }
 
 /* Keys flare white-hot on press and fade through their own hue, using the map
- * so the flare lands on the right LED. Driven by the key bitmap we already
- * ingest - no extra scanner traffic at all.
+ * so the flare lands on the right LED. Driven by the already-ingested key
+ * bitmap - no extra scanner traffic.
  */
 static void fx_render_reactive(void)
 {
@@ -598,7 +598,7 @@ static void fx_render_heatmap(void)
          * a hair every 128 frames (~0.6 s) so one unusually hard jab does not
          * raise the bar for red permanently. Because hi includes the current
          * frame, the deepest instant of any press has d == hi, i.e. n == 255,
-         * i.e. red - so "as hard as you press this key" always reaches red.
+         * i.e. red - so the hardest instant of any press always reaches red.
          *
          * lo snaps down instantly but also leaks up ~50/s toward the live
          * value, so the resting baseline follows slow thermal drift instead of
@@ -836,8 +836,8 @@ bool g4b_fx_tick(void)
 
     now = k_uptime_get_32();
     if ((now - fx_last_ms) < G4B_FX_PERIOD_MS) {
-        /* Not due, but still ours: returning true keeps ZMK's staged frame from
-         * being transmitted underneath us between our frames.
+        /* Not due, but the slot is still owned: returning true keeps ZMK's
+         * staged frame from being transmitted between effect frames.
          */
         return true;
     }

@@ -34,13 +34,13 @@
  * Section 1 - recovered operational-link constants
  * ======================================================================== */
 
-/* Receiver -> keyboard leg (we receive here). Private address, 38-byte static. */
+/* Receiver -> keyboard leg (RX). Private address, 38-byte static. */
 #define DL_RX_BASE0     0x76412900u
 #define DL_RX_PREFIX0   0x00000071u
 #define DL_RX_STATLEN   38u
 
-/* Keyboard -> receiver leg (we transmit here). 19-byte static; the 4-byte CCM
- * MIC is omitted on air, so this direction is encrypted but not authenticated. */
+/* Keyboard -> receiver leg (TX). 19-byte static; the 4-byte CCM MIC is omitted on
+ * air, so this direction is encrypted but not authenticated. */
 #define DL_TX_BASE0     0x89BED600u
 #define DL_TX_PREFIX0   0x0000008Eu
 #define DL_TX_STATLEN   19u
@@ -53,8 +53,8 @@
 #define DL_CRCCNF       0x00000103u
 #define DL_CRCPOLY      0x0000065Bu
 /* Pairing-initial seed 1 and learned-link seed 0x087fc1 = fold(network id
- * 0xb7bfc001), both from CLAUDE_DONGLE_HANDOFF_2026-09-04.md. The old 0x00FFFFFF
- * was wrong. The RX leg cycles these two so we lock whichever phase is on air. */
+ * 0xb7bfc001), both recovered from the stock dongle-link capture. The RX leg
+ * cycles these two to lock whichever phase is on air. */
 #define DL_CRCINIT_PAIR 0x00000001u
 #define DL_CRCINIT_LINK 0x00087FC1u
 #define DL_DATAWHITEIV  0x40u
@@ -167,8 +167,8 @@ static int dl_ccm_decrypt(const uint8_t *in)
 	NRF_CCM->EVENTS_ENDKSGEN = 0;
 	NRF_CCM->EVENTS_ENDCRYPT = 0;
 	NRF_CCM->EVENTS_ERROR = 0;
-	/* KSGEN then CRYPT. In stock this is chained off RADIO via SHORTS/PPI; here
-	 * we run it on a captured buffer, which is adequate for offline decode. */
+	/* KSGEN then CRYPT. Stock chains this off RADIO via SHORTS/PPI; run here on a
+	 * captured buffer, adequate for offline decode. */
 	NRF_CCM->TASKS_KSGEN = 1;
 	while (NRF_CCM->EVENTS_ENDCRYPT == 0 && NRF_CCM->EVENTS_ERROR == 0) {
 		/* CCM completes in a few microseconds. */
@@ -202,7 +202,7 @@ static void dl_slot_reset(void)
  * are counted into the span but do not reset the set; a fresh A0 restarts it.
  * Returns true only on the completing second 90, when dl_ctr holds a coherent
  * single-slot counter. A small, positive, roughly-constant delta between
- * consecutive completions means we are tracking one live slot. */
+ * consecutive completions indicates one live slot is being tracked. */
 static bool dl_slot_apply(uint8_t opcode, const uint8_t *body)
 {
 	dl_asm_span++;
@@ -400,7 +400,7 @@ static K_SEM_DEFINE(dl_go, 0, 1);
 
 static uint8_t dl_rxbuf[64] __aligned(4);
 static uint8_t dl_txbuf[64] __aligned(4);
-static uint8_t dl_ctrl_local_seq; /* our bit3 application sequence */
+static uint8_t dl_ctrl_local_seq; /* bit3 application sequence */
 
 /* Per-capture diagnostic counters. A frame is "heard" when g4b_esb_rx returns a
  * packet (any CRC); crcok counts CRC-24 matches under the operational CRCINIT. */
@@ -408,9 +408,9 @@ static uint32_t dl_rx_heard;
 static uint32_t dl_rx_crcok;
 static uint32_t dl_rx_crcbad;
 
-/* "APXRX ch=NN crc=C op=XX b=<full frame hex>" - one received frame, verbatim,
- * so we can see exactly what the receiver puts on air rather than a derived
- * value. Dumps the whole static-length frame for offline field analysis. */
+/* "APXRX ch=NN crc=C op=XX b=<full frame hex>" - one received frame, verbatim
+ * rather than a derived value. Dumps the whole static-length frame for offline
+ * field analysis. */
 static void dl_emit_rx(uint8_t ch, int crc, const uint8_t *frame, uint32_t len)
 {
 	uint8_t line[160];
@@ -504,8 +504,8 @@ static void dl_handle_rx(const uint8_t *frame, int crc, uint8_t ch)
 }
 
 /* "APXDLSUM legs=.. heard=.. crcok=.. crcbad=.." - periodic listen summary. A
- * zero crcok proves no clean operational frame reached us (wrong mode/address or
- * no bond); a non-zero crcok means the dumped APXRX bytes are real. */
+ * zero crcok proves no clean operational frame arrived (wrong mode/address or no
+ * bond); a non-zero crcok means the dumped APXRX bytes are real. */
 static void dl_emit_sum(uint32_t legs)
 {
 	uint8_t line[80];
@@ -578,9 +578,9 @@ static void dl_dwell(uint8_t ch, uint32_t window_us)
 	dl_radio_off();
 }
 
-/* One transmit leg: drain a queued report if the peer has acked our last, else
- * send an idle keepalive so the link stays up. Unused in the passive listen
- * build; kept for the active state machine. */
+/* One transmit leg: drain a queued report if the peer acked the last, else send an
+ * idle keepalive to hold the link up. Unused in the passive listen build; kept for
+ * the active state machine. */
 static __maybe_unused void dl_tx_leg(uint8_t ch)
 {
 	uint8_t payload[DL_APP_PAYLOAD_BYTES];

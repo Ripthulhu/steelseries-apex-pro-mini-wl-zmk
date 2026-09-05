@@ -41,8 +41,8 @@
 #define G4B_ESB_TXPOWER_P4DBM  4u          /* +4 dBm (register takes int8 dBm) */
 
 /* Provisional static length: 32-byte NKRO bitmap + a 4-byte link header
- * ([seq][mirror][PID][flags]). The exact header count is a residual - this is a
- * starting value to be corrected once we see the receiver respond. */
+ * ([seq][mirror][PID][flags]). The exact header count is a residual - a starting
+ * value to be corrected once the receiver responds. */
 #define G4B_ESB_STATLEN_NKRO   36u
 
 bool g4b_esb_hfclk_start(void)
@@ -166,9 +166,9 @@ static void esb_radio_disable(void)
 {
 	uint32_t start = k_cycle_get_32();
 
-	/* Clear SHORTS first: otherwise a still-set DISABLED_RXEN turns the
-	 * DISABLED we are about to cause straight back into an RX ramp, so the
-	 * radio never actually stays disabled and the next TXEN wedges. */
+	/* Clear SHORTS first: a still-set DISABLED_RXEN turns this DISABLED straight
+	 * back into an RX ramp, so the radio never stays disabled and the next TXEN
+	 * wedges. */
 	NRF_RADIO->SHORTS = 0;
 	NRF_RADIO->EVENTS_DISABLED = 0;
 	NRF_RADIO->TASKS_DISABLE = 1;
@@ -548,8 +548,8 @@ void g4b_esb_on_radio_free(void)
 	g4b_esb_configure(G4B_ESB_STATLEN_NKRO);
 	g4b_esb_set_channel(0u);
 
-	/* Read the registers back and report, so we can confirm on hardware that
-	 * the standdown really freed NRF_RADIO and our config sticks. */
+	/* Read the registers back and report: confirms on hardware that the standdown
+	 * freed NRF_RADIO and the config sticks. */
 	esb_emit_config(hf);
 
 #if IS_ENABLED(CONFIG_APEX_G4B_DONGLE_LINK)
@@ -558,7 +558,7 @@ void g4b_esb_on_radio_free(void)
 	 * type-2 B0 handoff. The pairing thread stays parked on esb_go. */
 	g4b_dongle_link_start();
 #else
-	/* Release the pairing-TX thread now the radio is ours and configured. */
+	/* Release the pairing-TX thread now the radio is free and configured. */
 	k_sem_give(&esb_go);
 #endif
 }

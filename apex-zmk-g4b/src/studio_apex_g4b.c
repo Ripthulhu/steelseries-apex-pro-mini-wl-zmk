@@ -1,9 +1,8 @@
 /* SPDX-License-Identifier: MIT
  *
- * The `apex` ZMK Studio RPC subsystem: exposes the Apex-specific control and
- * telemetry (starting with the usage heatmap) to the Studio host app, over the
- * same protobuf RPC transport as core/keymap/behaviors. Thin wrappers over the
- * shared apex_control API.
+ * The `apex` ZMK Studio RPC subsystem: heatmap, status, and per-key actuation
+ * over the same protobuf RPC transport as core/keymap/behaviors. Wrappers over
+ * the shared apex_control / actuation APIs.
  */
 #include <zephyr/kernel.h>
 

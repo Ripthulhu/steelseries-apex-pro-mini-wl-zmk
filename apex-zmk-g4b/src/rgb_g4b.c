@@ -305,10 +305,9 @@ void g4b_rgb_set_blanked(bool blank)
         /* A separate all-zero page rather than zeroing rgb_pwm_frame, so the
          * staged frame survives untouched and unblanking is instant.
          *
-         * Pushed BEFORE the rail drops, while the part can still hear us. It
-         * costs one transfer and means the array is dark by command rather than
-         * by losing its supply, so there is no chance of a bright frame flashing
-         * as the rail collapses.
+         * Pushed BEFORE the rail drops, while the controller is still powered.
+         * One transfer; the array goes dark by command rather than by losing its
+         * supply, so no bright frame flashes as the rail collapses.
          */
         static uint8_t dark[2u + G4B_RGB_CHANNELS];
 
@@ -322,14 +321,12 @@ void g4b_rgb_set_blanked(bool blank)
         g4b_rgb_cs_park();
     } else {
         /* Restore CS and SPIM before the rail rises, then do a full controller
-         * bring-up, because everything the part knew died with its supply. Only
-         * then re-arm the pending flag, so
-         * the next flush repaints the frame underglow has been staging all
-         * along - within one 50 ms tick, so it is current and not stale.
+         * bring-up (all controller state is lost with the supply). Re-arm the
+         * pending flag last, so the next flush repaints the staged frame within
+         * one 50 ms tick.
          *
-         * The rails and the blank are ONE piece of state, deliberately. Two
-         * independent notions of "the LEDs are off" that can disagree is how
-         * you get an array that never comes back.
+         * Rails and blank are one piece of state: two independent "LEDs off"
+         * flags that can disagree risk leaving the array permanently dark.
          */
         g4b_rgb_cs_init();
         spim2_enable();

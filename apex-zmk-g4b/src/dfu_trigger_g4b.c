@@ -86,7 +86,7 @@ static void g4b_dfu_uart_isr(const struct device *dev, void *user_data)
 
 /* Strong override of the __weak hook in ZMK's usb.c. The next stack has no
  * per-device DTE-rate callback (legacy cdc_acm_dte_rate_callback_set is gone);
- * the single usbd_msg cb routes USBD_MSG_CDC_ACM_LINE_CODING here. Filter to our
+ * the single usbd_msg cb routes USBD_MSG_CDC_ACM_LINE_CODING here. Filter to the
  * port so the Studio RPC CDC's line-coding can't false-trigger DFU. */
 void zmk_usb_cdc_line_coding_changed(const struct device *dev);
 

@@ -414,10 +414,10 @@ config APEX_G4B_SLEEP_SCAN_PERIOD
 	depends on APEX_G4B_SLEEP_MS > 0 && APEX_G4B_STM32_RESET_MS > 0
 	help
 	  The nRF drops to ~2 uA in System OFF, but the STM32 scanner keeps running
-	  at full cadence (~3-5 mA) because its ATTN line is our ONLY wake source -
+	  at full cadence (~3-5 mA) because its ATTN line is the only wake source -
 	  so the scanner, not the nRF, dominates the sleep-current budget. This sends
-	  SET_MODE 0x20 mode 0x03 <period> to the scanner immediately before we stop
-	  the CPU: mode 0x03 selects the alternate (slower) scan cadence, which still
+	  SET_MODE 0x20 mode 0x03 <period> to the scanner immediately before the CPU
+	  stops: mode 0x03 selects the alternate (slower) scan cadence, which still
 	  detects keys and still raises ATTN, just up to <period> later. That extra
 	  latency only ever applies to the very first key that WAKES a sleeping
 	  keyboard (already a full-reset + BLE-reconnect event), so it is free.
@@ -909,7 +909,7 @@ config APEX_G4B_DONGLE_RADIO
 	  stock keyboard's protocol - 2 Mbit, CRC 0x11021, ESB pipe prefixes, no
 	  encryption). Radio ownership is a boot decision: moving the switch across
 	  the dongle boundary resets the board so the correct owner (BLE controller
-	  or, later, our ESB stack) comes up cleanly. This option only performs the
+	  or, later, the ESB stack) comes up cleanly. This option only performs the
 	  standdown; the ESB transmitter is a separate option. With this off, the
 	  dongle position keeps the normal scanner active and behaves like USB-only.
 	  See src/radio_g4b.c.

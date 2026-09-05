@@ -89,7 +89,7 @@ uint32_t g4b_gp_err;
 /* input_report_done makes hid_device_submit_report() asynchronous: it returns
  * as soon as the transfer is queued and calls this when the IN transfer
  * completes. Releasing the semaphore here is what lets the next frame go - the
- * same drop-on-busy rate limit the legacy .int_in_ready gave us. */
+ * same drop-on-busy rate limit as the legacy .int_in_ready. */
 static void gp_in_done(const struct device *dev, const uint8_t *const report)
 {
     ARG_UNUSED(dev);
@@ -139,7 +139,7 @@ static void gp_work_fn(struct k_work *work)
      * frame is simply dropped - the next sample is along in a few milliseconds
      * and carries the current position anyway, because this is absolute state
      * rather than a delta. Waiting here would let a stalled host back up into
-     * whatever called us. The semaphore is released in gp_in_done().
+     * the caller. The semaphore is released in gp_in_done().
      */
     if (k_sem_take(&gp_sem, K_NO_WAIT) != 0) {
         g4b_gp_busy++;
@@ -224,9 +224,8 @@ void g4b_gamepad_publish(uint16_t x, uint16_t y, uint16_t z, uint16_t rz,
     gp_published[10] = buttons;
     k_spin_unlock(&gp_lock, key);
 
-    /* Submitting an already-pending work item is a no-op, which gives us a free
-     * rate limit: however fast the caller publishes, at most one report is
-     * queued at a time.
+    /* Submitting an already-pending work item is a no-op - a free rate limit:
+     * however fast the caller publishes, at most one report is queued at a time.
      */
     k_work_submit(&gp_work);
 }

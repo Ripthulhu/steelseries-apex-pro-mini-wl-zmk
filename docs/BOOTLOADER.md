@@ -40,7 +40,7 @@ application at the MBR boundary (`0x1000`).
 
 ## Board port
 
-The Adafruit bootloader is built for our board from a copy under
+The Adafruit bootloader is built for this board from a copy under
 `bootloader/apex_pro_mini_wl/` (derived from the `bluemicro_nrf52833` board).
 The parts that matter for this hardware:
 
@@ -112,7 +112,7 @@ unused Kconfig symbol here, and `sys_arch_reboot()` is the `__weak` stub that
 ignores its argument. So ZMK's stock `&bootloader` behavior would *not* reach
 DFU on this board.
 
-Every DFU path we built therefore writes the magic **directly**:
+Every DFU path therefore writes the magic **directly**:
 
 ```c
 NRF_POWER->GPREGRET = 0x57u;   /* 0x57 = DFU_MAGIC_UF2_RESET */

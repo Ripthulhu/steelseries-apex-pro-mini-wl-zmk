@@ -2,10 +2,9 @@
  *
  * apex_control - the single control/telemetry API for the Apex Pro Mini WL.
  *
- * This is the shared layer that the three host-facing frontends all call, so a
- * value changed from the UART shell, ZMK Studio (apex RPC subsystem), or a Fn
- * keymap behavior goes through identical, already-thread-safe code and persists
- * the same way (NVS via the existing settings records):
+ * Shared layer for the three host-facing frontends; a value changed from any of
+ * them (UART shell, Studio apex RPC, Fn keymap behavior) runs the same
+ * thread-safe code and persists to NVS the same way:
  *
  *     [ UART shell ]      [ Studio apex RPC ]      [ keymap behaviors ]
  *              \                  |                        /
@@ -17,10 +16,10 @@
  *          v                      v                       v
  *   twi_g4b (BQ25895)     actuation_g4b (STM32)     rgb_fx_g4b (IS31FL3743B)
  *
- * Getters are cheap/non-blocking where possible; battery reads trigger one
+ * Getters are non-blocking where possible; battery reads trigger one
  * BQ ADC conversion. Setters clamp to safe bounds and mark settings dirty for
- * the debounced NVS write. NOTHING here can reach BQ REG00 or STM32 opcode 0x32
- * (flash calibration) - both stay off-limits by construction.
+ * the debounced NVS write. No path here reaches BQ REG00 or STM32 opcode 0x32
+ * (flash calibration); both are off-limits by construction.
  */
 #ifndef APEX_CONTROL_G4B_H
 #define APEX_CONTROL_G4B_H

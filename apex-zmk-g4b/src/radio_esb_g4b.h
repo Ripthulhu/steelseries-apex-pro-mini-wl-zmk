@@ -12,7 +12,7 @@
 
 /* Start the HF crystal oscillator. The RADIO needs HFXO (not the RC) for the
  * 2 Mbit PHY; the BLE controller released its clock request during standdown,
- * so we must request it ourselves. Bounded spin; returns true if it started. */
+ * so it must be requested here. Bounded spin; returns true if it started. */
 bool g4b_esb_hfclk_start(void);
 
 /* Program NRF_RADIO with the confirmed operational vendor PHY. `statlen` is the

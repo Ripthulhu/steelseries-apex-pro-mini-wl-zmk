@@ -33,7 +33,7 @@
 
 #include "spinor_g4b.h"
 
-/* Version marker: a CRC-32 of our own live application image, computed once at
+/* Version marker: a CRC-32 of the live application image, computed once at
  * init and returned in the status report. The image the loader applies sits at
  * internal 0x1C000 and is exactly the 0x4B000-byte vendor.bin (see the
  * staged-file finding). The LAST 4 bytes of that image are the vendor CRC-32 of
@@ -301,7 +301,7 @@ K_THREAD_DEFINE(g4b_updater_tid, 1024, upd_thread, NULL, NULL, NULL,
 
 static int g4b_updater_init(void)
 {
-    /* Fingerprint our own image once at boot. Reading XIP flash directly is
+    /* Fingerprint the image once at boot. Reading XIP flash directly is
      * fine; the region is the applied vendor image and always present. */
     upd_marker = crc32_ieee((const uint8_t *)G4B_IMG_BASE, G4B_IMG_LEN);
 

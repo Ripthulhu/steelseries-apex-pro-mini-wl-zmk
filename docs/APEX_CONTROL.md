@@ -78,7 +78,7 @@ applies to all builds). ZMK's own `CONFIG_ZMK_LOG_LEVEL` is a promptless int
 hardcoded to 4 (DBG) and can't be lowered from a fragment, so don't try — quiet it
 at runtime instead.
 
-> **BLE advertising is owned entirely by ZMK — never stop it from our code.**
+> **BLE advertising is owned entirely by ZMK — never stop it from board code.**
 > `mode_gate_work` used to call `bt_le_adv_stop()` **and** force
 > `bt_conn_disconnect()` when entering a non-BT mode. That races the softdevice-less
 > controller: ZMK's `update_advertising()` (`app/src/ble.c`) ignores the preferred
@@ -88,7 +88,7 @@ at runtime instead.
 > that **self-reboots the board on a mode switch**. The board looked alive but keys
 > were dead until it faulted and re-ran the clean boot bring-up. Fix: `mode_gate_work`
 > now only calls `zmk_endpoint_set_preferred_transport()` and lets ZMK own the radio;
-> a live BLE link simply stops being the report sink, which is what we want anyway.
+> a live BLE link simply stops being the report sink, which is the intended result.
 > Verified by 8 forced `apex mode` transitions with no new `apex crash` record.
 
 ### Status / telemetry

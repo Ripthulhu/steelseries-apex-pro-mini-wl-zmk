@@ -32,12 +32,10 @@ void g4b_mode_sample(void);
 enum g4b_mode g4b_mode_get(void);
 uint16_t g4b_mode_mv(void);
 
-/* Software override of the physical switch. @mode is a g4b_mode to force, or any
- * out-of-range value (e.g. -1) to return to following the switch. Applied to
- * g4b_mode_get(), so every consumer (endpoint policy, and in radio builds the
- * radio-owner reset) honors it. The new policy is applied immediately. The
- * override is kept in NOINIT RAM, so it survives a warm reset (the reset that
- * reassigns radio ownership) but not a power cycle. */
+/* Software override of the physical switch. @mode is a g4b_mode to force, or an
+ * out-of-range value (e.g. -1) to follow the switch again. Read via g4b_mode_get()
+ * so every consumer honours it. Kept in NOINIT RAM: survives the warm reset that
+ * reassigns radio ownership, but not a power cycle. */
 void g4b_mode_set_override(int mode);
 
 /* Current override, or -1 when following the switch. */
@@ -45,14 +43,14 @@ int g4b_mode_get_override(void);
 
 /* True if the switch was in the dongle position at boot. Latched once in
  * g4b_mode_init(), so it names the RADIO owner chosen for this launch (BLE
- * controller vs. our ESB stack) - see radio_g4b.c. */
+ * controller vs. the ESB stack) - see radio_g4b.c. */
 bool g4b_mode_boot_dongle(void);
 
 /* Sticky observations about the switch line, for record_s3.mode_class.
  *
  * DIAGNOSTIC ONLY - nothing gates on these and the feed decision at
  * wdt_g4b.c:158 is untouched. They exist because a single live millivolt
- * reading cannot answer the question we actually have: a pin sitting at
+ * reading cannot disambiguate: a pin sitting at
  * 3300 mV looks identical whether the switch is genuinely in the dongle
  * position or the divider is shorted on this unit. If the operator moves the
  * switch during a run and BOTH bits end up set, the line demonstrably swings

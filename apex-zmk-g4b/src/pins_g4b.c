@@ -20,7 +20,7 @@
 
 /* GPIOTE CONFIG[1] for the STM32 attention line P0.24: MODE=Event(1), PSEL=24,
  * PORT=0, POLARITY=LoToHi(1) -> 0x00011801. The STM32 raises ATTN when it queues
- * a key-state report and drops it once we read the 0xA1. Interrupt-driving that
+ * a key-state report and drops it once the 0xA1 is read. Interrupt-driving that
  * edge wakes the scan thread instead of waiting for the active or idle poll
  * deadline (which can
  * be hundreds of milliseconds in the battery-saving tiers). Channel 0 (READY)
@@ -431,7 +431,7 @@ void g4b_pin_survey(uint32_t p0_mask, uint32_t p1_mask,
  * Each candidate is driven with a DIFFERENT DUTY CYCLE. A multimeter on DC
  * averages the square wave, so every pin reads as its own steady voltage and a
  * pad is identified by one reading against a table - no blink-counting, no
- * timing, no ambiguity about which pin you are on. 17 steps gives 194 mV
+ * timing, no ambiguity about which pin is active. 17 steps gives 194 mV
  * between neighbours, which any meter resolves.
  *
  * THIS DRIVES PINS, which the survey deliberately did not. It is only safe

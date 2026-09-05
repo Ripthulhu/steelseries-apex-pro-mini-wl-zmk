@@ -51,7 +51,7 @@ zephyr_library_sources_ifdef(CONFIG_APEX_G4B_COREDUMP src/coredump_g4b.c)
 zephyr_library_sources_ifdef(CONFIG_APEX_G4B_LITTLEFS src/littlefs_g4b.c)
 # <zephyr/fs/littlefs.h> pulls in lfs.h, which lives in the littlefs module, not
 # on this out-of-tree library's default include path (the in-tree fs subsystem
-# gets it, we don't). Add the module dir when the substrate is enabled.
+# gets it, this library does not). Add the module dir when the substrate is enabled.
 zephyr_include_directories_ifdef(CONFIG_APEX_G4B_LITTLEFS ${ZEPHYR_LITTLEFS_MODULE_DIR})
 zephyr_library_sources_ifdef(CONFIG_APEX_G4B_UPDATER src/updater_g4b.c)
 zephyr_library_sources_ifdef(CONFIG_APEX_G4B_AB_ROLLBACK src/ab_rollback_g4b.c)

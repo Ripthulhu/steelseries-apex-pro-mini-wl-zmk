@@ -164,7 +164,7 @@ struct g4b_twi_result g4b_bq_read(uint8_t reg)
 
     /* Phase 2: one byte back. BB_STOP is armed BEFORE STARTRX so the STOP is
      * issued off the byte-boundary event; arming it afterwards is the classic
-     * way to read a second byte you did not ask for.
+     * way to read an unrequested second byte.
      */
     REG32(G4B_TWI_SHORTS) = G4B_TWI_SHORT_BB_STOP;
     REG32(G4B_TWI_EVENTS_RXDREADY) = 0u;
@@ -310,14 +310,12 @@ bool g4b_bq_configure_charge(void)
     return bq_write(G4B_BQ_REG_ICHG, G4B_BQ_ICHG_1472MA);
 }
 
-/* --- Runtime (live) charge configuration -------------------------------------
+/* --- Runtime charge configuration --------------------------------------------
  *
- * These let a host (shell / Studio) change the charge ceiling and current after
- * boot. They rely on g4b_bq_configure_charge() having already disarmed the 40 s
- * I2C watchdog at boot, so a single register write sticks with no periodic kick.
- * Both go through the same named-op bq_write() (REG06/REG04 only) - there is
- * still no general write(reg,val), and REG06 is HARD-CLAMPED so VREG can never
- * be driven above the pack's 4.400 V rated maximum.
+ * Change the charge ceiling/current after boot. g4b_bq_configure_charge() has
+ * already disarmed the 40 s I2C watchdog, so a single register write sticks.
+ * Named-op bq_write() only (REG06/REG04); REG06 is hard-clamped so VREG cannot
+ * exceed the pack's 4.400 V rated max.
  */
 #define G4B_BQ_VREG_MIN_MV 3840u
 #define G4B_BQ_VREG_MAX_MV 4400u /* Fuji 4867A0 rated max - never exceed */

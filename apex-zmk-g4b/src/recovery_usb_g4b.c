@@ -95,7 +95,7 @@ static int recovery_set_report(const struct device *dev,
     return 0;
 }
 
-/* Only set_report - we never send IN reports, so int_in_ready is not needed and
+/* Only set_report - no IN reports are sent, so int_in_ready is not needed and
  * the IN endpoint simply stays idle. No int_out_ready either: the command comes
  * over the control endpoint, so this interface needs no interrupt OUT endpoint.
  */

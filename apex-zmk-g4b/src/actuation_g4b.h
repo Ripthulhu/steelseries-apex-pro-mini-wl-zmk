@@ -6,20 +6,15 @@
 #include <stddef.h>
 #include <stdbool.h>
 
-/* Runtime actuation and rapid-trigger controls, for the keymap.
+/* Runtime actuation and rapid-trigger controls for the keymap (Fn layer: I/O =
+ * actuation deeper/shallower, T = rapid trigger).
  *
- * The keycaps have always carried these legends - I and O for actuation up and
- * down, T for rapid trigger - and they were inert because the settings were
- * build-time constants. They are runtime state now.
+ * Called from ZMK's thread: each moves a byte and raises a flag; the g4b thread
+ * sends the frames (SPIM3 has one writer). Nothing here touches the bus.
  *
- * All of these are called from ZMK's thread. They move a byte and raise a flag;
- * the g4b thread notices and sends the frames, because SPIM3 has exactly one
- * writer. Nothing here touches the bus.
- *
- * The actuation ladder is six MEASURED points - 1.0, 1.5, 2.0, 2.1, 2.5 and
- * 3.0 mm - because the scanner takes indices into a lookup table in its own
- * flash and the mapping is not linear. Stepping arithmetically would be
- * inventing depths nobody has verified. See link_g4b.c for the table.
+ * The actuation ladder is six measured points - 1.0, 1.5, 2.0, 2.1, 2.5, 3.0 mm.
+ * The scanner indexes a non-linear lookup table in its flash, so arithmetic
+ * stepping would land on unverified depths. Table in link_g4b.c.
  */
 
 /* Move the actuation point one step deeper (+1) or shallower (-1). Clamped at
@@ -28,9 +23,9 @@
 void g4b_actuation_step(int delta);
 
 /* Per-key actuation overrides, keyed by STM32 scan index (0..APEX_G4B_KEY_COUNT-1).
- * g4b_act_key_set snaps `tenths` to the ladder and re-pushes the thresholds; a
- * tenths of 0 clears the override so the key follows the global point again.
- * g4b_act_key_tenths returns the key's effective depth (override or global). */
+ * g4b_act_key_set takes a depth in tenths of a mm (2..38, clamped) and re-pushes the
+ * thresholds; tenths 0 clears the override. g4b_act_key_tenths returns the key's
+ * effective depth (override or global). */
 int      g4b_act_key_set(uint32_t key, uint8_t tenths);
 uint8_t  g4b_act_key_tenths(uint32_t key);
 bool     g4b_act_key_is_override(uint32_t key);
@@ -75,10 +70,9 @@ struct g4b_link_stats {
     uint32_t frames_matched;  /* boot handshake: frames whose reply validated */
     uint32_t ingest_calls;    /* boot probe: bitmaps handed to ZMK's kscan */
     uint32_t ingest_ok;       /* boot probe: those it accepted */
-    /* Live counters from the permanent scan loop (s3_run_keyboard). The four
-     * above are one-shot boot snapshots and never move once the keyboard loop
-     * takes over - watch these to see the scanner working in real time. */
-    uint32_t live_key_events; /* accepted key state changes (climbs as you type) */
+    /* Live counters from the permanent scan loop (s3_run_keyboard); the four above
+     * are one-shot boot snapshots that stop moving once the keyboard loop starts. */
+    uint32_t live_key_events; /* accepted key state changes */
     uint32_t live_keepalives; /* idle 0xA0 keep-alive polls between events */
 };
 void g4b_link_stats_get(struct g4b_link_stats *out);

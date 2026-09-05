@@ -133,9 +133,9 @@ static int fs_provision(void)
 		return 0; /* already provisioned - leave existing NVS intact */
 	}
 
-	/* Format the partition, then stamp the marker so this never repeats. If any
-	 * step fails we deliberately do NOT write the marker, so the next boot
-	 * retries rather than leaving a half-formatted partition marked done. */
+	/* Format the partition, then stamp the marker so this never repeats. On any
+	 * failure the marker is not written, so the next boot retries rather than
+	 * leaving a half-formatted partition marked done. */
 	if (g4b_spinor_dev_erase(NVS_PART_BASE, NVS_PART_SIZE) != 0) {
 		return 0;
 	}

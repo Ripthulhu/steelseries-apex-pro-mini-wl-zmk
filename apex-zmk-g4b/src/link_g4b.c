@@ -71,12 +71,12 @@ BUILD_ASSERT(CONFIG_APEX_G4B_STAGE >= 0 && CONFIG_APEX_G4B_STAGE <= 7,
 
 /* Pins neither this payload nor the vendor loader drives, so the ones worth
  * asking about. Derived from the loader's own P0.DIR = 0x0C000855 and
- * P1.DIR = 0x00000321 measured at boot, minus everything we use ourselves.
+ * P1.DIR = 0x00000321 measured at boot, minus the pins the payload drives.
  *   P0: 1, 8, 9, 12-17, 20-22, 28-31
  *   P1: 1-4, 6, 7
  * P0.09 is an NFC pin by default, but P0.10 already works as the diagnostic
- * UART, which proves NFC is disabled in UICR - so it is ordinary GPIO and we
- * need not (and must not) write UICR to make it so.
+ * UART, which proves NFC is disabled in UICR - so it is ordinary GPIO; no UICR
+ * write is needed or permitted to make it so.
  */
 #define G4B_SURVEY_P0_MASK 0xF073F302u
 #define G4B_SURVEY_P1_MASK 0x000000DEu
@@ -414,8 +414,8 @@ static void s2_fill_head(struct g4b_s2_head *head, uint16_t version,
 
 /* Replay the frozen prefix byte for byte, comparing all 64 bytes of every
  * response. Abort on the first mismatch: continuing to push configuration into
- * a slave that is not answering as recorded is precisely the case where we no
- * longer know what we are doing.
+ * a slave that is not answering as recorded is the case where the link state is
+ * no longer known.
  */
 /* Adjustable actuation point.
  *
@@ -453,17 +453,15 @@ BUILD_ASSERT(CONFIG_APEX_G4B_ACTUATION_PRESS > CONFIG_APEX_G4B_ACTUATION_RELEASE
  *
  * The Kconfigs still exist and still set the boot values - what changed is that
  * the keymap can move them afterwards, which is what the keycaps have always
- * promised. The legends on I and O say actuation up and down, and on T rapid
- * trigger; those keys were left inert because we could only do this at build
- * time.
+ * promised. The I/O legends mean actuation up/down and T means rapid trigger;
+ * those keys were inert while these values were build-time constants.
  *
  * THE LADDER IS A TABLE, NOT ARITHMETIC. The scanner does not take millimetres.
  * These bytes are indices into a 256-entry lookup table in the STM32's own
  * flash at 0x0800D3E0, and the mapping is not linear: 16 is 1.0 mm, 29 is
  * 1.5 mm, 46 is 2.0 mm, 50 is 2.1 mm (stock), 70 is 2.5 mm, 110 is 3.0 mm.
- * Stepping by arithmetic would be inventing depths we have never measured, so
- * the ladder contains only indices whose depth we actually read out of that
- * table.
+ * Arithmetic stepping would invent unmeasured depths, so the ladder holds only
+ * indices whose depth is read from that table.
  */
 static const uint8_t g4b_act_steps[] = { 16u, 29u, 46u, 50u, 70u, 110u };
 #define G4B_ACT_STEP_DEFAULT 3u  /* index 3 */
@@ -497,12 +495,9 @@ static uint8_t s3_reset_gap = G4B_RESET_GAP_DEFAULT;
 static uint8_t s3_act_step = G4B_ACT_STEP_DEFAULT;
 
 /* Per-key actuation override, indexed by STM32 scan index. 0 = use the global
- * point; otherwise the depth in tenths of a millimetre (2..38 = 0.2..3.8 mm). The
- * 0 sentinel lets the static zero-init mean "every key follows the global point".
- * Unlike the global control (a 6-point ladder), per-key spans the scanner's full
- * travel range via g4b_tenths_to_index[] below. The RE showed the 0x30/0x33 frames
- * address keys individually via their {start,count} header, so we can give each key
- * its own actuation point on the same wire path. */
+ * point, else the depth in tenths of a mm (2..38 = 0.2..3.8 mm). The 0x30/0x33
+ * frames address keys via their {start,count} header, so per-key spans the full
+ * travel range (g4b_tenths_to_index[]), not just the six global ladder points. */
 static uint8_t s3_perkey_tenths[APEX_G4B_KEY_COUNT];
 
 /* Actuation depth (tenths of a mm, 0..38) -> travel-table index, read from the
@@ -590,9 +585,8 @@ int g4b_scan_raw(const uint8_t *tx, uint32_t len, uint8_t *rx, uint32_t timeout_
     return s3_req_raw_ok ? 0 : -EIO;
 }
 
-/* Full scanner re-bring-up (the 59-frame boot config replay). Defined below;
- * forward-declared so the shell raw-frame recovery can re-arm the scanner in
- * place without a whole reboot. */
+/* Full scanner re-bring-up (the 59-frame boot config replay); defined below,
+ * forward-declared for the raw-frame recovery below. */
 static void s2_run_replay(uint32_t start, uint32_t deadline_cycles);
 
 /* Runs on the g4b thread from the ATTN-low branch. Owns the pins and SPIM here,
@@ -622,20 +616,18 @@ static void s3_service_shell_requests(void)
         NRF_P0->OUTSET = BIT(25);
     }
     if (s3_req_raw_pending) {
-        /* One raw 64-byte scanner exchange for the shell. Safe here: ATTN is low
-         * so nothing is queued, and we own the SPIM. The shell already refused the
-         * dangerous opcodes before setting this. */
+        /* One raw 64-byte scanner exchange for the shell. Safe here: ATTN is low so
+         * nothing is queued and the g4b thread owns the SPIM. Dangerous opcodes are
+         * refused by the shell before the request is raised. */
         struct g4b_exchange_stats stats = {0};
         g4b_spim_arm_ready();
         (void)g4b_spim_exchange(s3_raw_tx, s3_raw_rx, &stats);
         s3_req_raw_ok = (stats.result == G4B_SPIM_OK) ? 1u : 0u;
 
-        /* A raw frame injected outside the loop's own rhythm (an 0xA2 lowers ATTN,
-         * an 0xA1 consumes an event) leaves the scanner's event state stuck, so
-         * keys stop reaching us until the next full bring-up. Just re-issuing the
-         * enable is not enough - the event state only re-arms on the full config
-         * sequence - so re-run the whole 59-frame boot replay here (~0.5 s, the
-         * same thing a reboot does), so a probe can never strand the keyboard. */
+        /* A raw frame injected outside the loop's rhythm (0xA2 lowers ATTN, 0xA1
+         * consumes an event) leaves the scanner's event state stuck until the next
+         * bring-up. Re-issuing the enable alone does not re-arm it; the full 59-frame
+         * replay does. */
         s2_run_replay(g4b_cyccnt(), G4B_S2_REPLAY_BUDGET_CYCLES);
         s3_cfg_dirty = 1u;
 
@@ -676,7 +668,7 @@ static void s2_apply_actuation(uint8_t *tx)
     if (count == 0u ||
         (G4B_THRESH_HEADER + count * 2u) > G4B_SPIM_FRAME) {
         /* Not the layout this was written against. Leave the frame exactly as
-         * captured rather than corrupting a frame we do not understand.
+         * captured rather than corrupting an unrecognized frame layout.
          */
         return;
     }
@@ -717,8 +709,8 @@ static void s2_apply_actuation(uint8_t *tx)
  *
  * Stock sends 0 for all 63 real keys, so stock has rapid trigger OFF. The seven
  * positions that carry 2 are unpopulated sensors echoing the scanner's own init
- * default. That gives us a clean rule that needs no hardcoded key list: rewrite
- * a record only where stock left it at 0, which is exactly the set of real keys.
+ * default. This gives a rule needing no hardcoded key list: rewrite a record
+ * only where stock left it at 0, which is the set of real keys.
  *
  * Interaction worth knowing, because it changes what the actuation point means:
  * with rapid trigger on, the 0x30 press code is only the ARMING depth, used for
@@ -939,8 +931,8 @@ SYS_INIT(g4b_usbd_preinit_probe, PRE_KERNEL_1, 0);
 /* Snapshot SPIM2 exactly as the vendor loader left it.
  *
  * SPIM2 drives the IS31FL3743B. The loader configures it to light the recovery
- * red, then jumps to us with no reset in between, so PSEL still holds the pin
- * numbers we need and cannot get from the stock image - which contains only
+ * red, then jumps in with no reset in between, so PSEL still holds the pin
+ * numbers, which are absent from the stock image - it contains only
  * SPIM3's nrfx pin quad.
  *
  * PRE_KERNEL_1 so nothing in Zephyr has had a chance to rebind the peripheral.
@@ -981,7 +973,7 @@ SYS_INIT(g4b_spim2_snapshot, PRE_KERNEL_1, 0);
  * status callback raised - instead of leaving it convinced USB is still down.
  *
  * Every precondition is checked and the outcome recorded, so a launch where the
- * driver got there by itself is distinguishable from one where we intervened.
+ * driver got there by itself is distinguishable from an intervention.
  */
 #if IS_ENABLED(CONFIG_APEX_G4B_USB_KICK)
 static const uint32_t usb_snap_addr[G4B_USB_SNAP_WORDS] = {
@@ -1576,10 +1568,10 @@ static uint32_t txt_str(uint8_t *dst, const char *src)
  * decision and the transmit are on the same thread and the SPIM2 single-writer
  * invariant holds.
  *
- * Activity is our own ingest, not ZMK's activity state: this needs its own
+ * Activity here means ingest, not ZMK's activity state: this needs its own
  * timeout (30 seconds) without disturbing ZMK_IDLE_TIMEOUT, which is 30 s and
  * shared with other subsystems. A key held down without moving does not
- * re-ingest and so reads as idle - correct for a keyboard nobody is at, and
+ * re-ingest and so reads as idle - correct for an unattended keyboard, and
  * the frame comes straight back on the release.
  */
 static void s3_rgb_idle_update(void)
@@ -1734,8 +1726,8 @@ static int g4b_settings_set(const char *name, size_t len,
      *
      * Settings load during application init and the g4b thread does not start
      * for another 250 ms, so the replay should already pick these up. "Should"
-     * is doing work in that sentence - it depends on init ordering we do not
-     * control - and one extra config resend costs a few frames, where getting
+     * is doing work in that sentence - it depends on init ordering outside this
+     * path's control - and one extra config resend costs a few frames, where getting
      * it wrong means the board silently runs at defaults while the saved values
      * sit in flash.
      */
@@ -2121,10 +2113,10 @@ static void s3_sleep_maybe(void)
 #endif
 
 #if CONFIG_APEX_G4B_SLEEP_SCAN_PERIOD > 0
-    /* Throttle the scanner before we stop the CPU.
+    /* Throttle the scanner before stopping the CPU.
      *
      * In System OFF the nRF draws ~2 uA, but the STM32 keeps scanning at full
-     * cadence (~3-5 mA) so it can raise ATTN - our only wake source - on a key.
+     * cadence (~3-5 mA) so it can raise ATTN - the only wake source - on a key.
      * The scanner therefore dominates the sleep budget. SET_MODE mode 0x03
      * selects the alternate (slower) scan interval: it still detects keys and
      * still raises ATTN, just up to <period> later, and that latency only ever
@@ -2196,7 +2188,7 @@ static bool s3_recover_scanner(bool defer_if_attn, bool *deferred)
 
     /* An external-NVS operation may have held the mutex after the caller's
      * ATTN-low check. For mode-3 recovery, never power-cycle across a key that
-     * arrived while we slept acquiring that lock: release everything and let
+     * arrived while the lock was being acquired: release everything and let
      * A1 run first. The known-failing STOP1 harness requests its historical
      * unconditional recovery behavior instead. */
     if (defer_if_attn && g4b_pin_read(G4B_PORT0, G4B_P0_ATTN)) {
@@ -2251,7 +2243,7 @@ static bool s3_recover_scanner(bool defer_if_attn, bool *deferred)
  * in-place restore. While scanner state 1 is active, that command is rejected
  * as 20 02 02. A detected matrix change calls the mode-1 callback, which clears
  * the alternate selector and immediately returns scanning to the primary
- * interval. Once ATTN is low again we also normalize the alternate interval to
+ * interval. Once ATTN is low again the alternate interval is normalized to
  * 1 with a mode-3 write, so either selector is full speed:
  *
  *     idle: 20 03 CONFIG_APEX_G4B_STM32_IDLE_SCAN_PERIOD_MS
@@ -2793,7 +2785,7 @@ static void s3_stop1_maybe(void)
 BUILD_ASSERT(G4B_A2_COUNT <= 32u, "0xA2 caps count at 32");
 BUILD_ASSERT(G4B_A2_START + G4B_A2_COUNT <= 70u, "0xA2 start+count must fit 70 keys");
 
-/* Window offsets of the four keys we care about, as sample indices. */
+/* Window offsets of the four sampled keys, as sample indices. */
 #define G4B_A2_W  (16u - G4B_A2_START)
 #define G4B_A2_A  (29u - G4B_A2_START)
 #define G4B_A2_S  (30u - G4B_A2_START)
@@ -3731,7 +3723,7 @@ static void s3_run_keyboard(void)
                                              APEX_G4B_KEY_BITMAP_SIZE) == 0) {
 #if IS_ENABLED(CONFIG_APEX_G4B_RGB)
                 /* Seed the reactive lighting on the RISING edge of each key,
-                 * off the bitmap we just accepted. Rising-only, so a held key
+                 * off the just-accepted bitmap. Rising-only, so a held key
                  * flares once rather than pinning its LED. s3_have_prev guards
                  * the first frame, where there is no previous to diff against.
                  * Costs a 9-byte compare and nothing on the bus.
@@ -3783,8 +3775,7 @@ static void s3_run_keyboard(void)
 
             /* A keymap control moved a threshold; push it to the scanner.
              * Here, in the ATTN-low branch, because the scanner has nothing
-             * queued - a config frame racing a key report is how you lose a
-             * keypress.
+             * queued - a config frame racing a key report loses a keypress.
              */
             if (s3_cfg_dirty != 0u) {
 #if CONFIG_APEX_G4B_STM32_IDLE_SCAN_PERIOD_MS > 1
@@ -4222,7 +4213,7 @@ static uint32_t s7_loaded;
 static bool s7_found;
 
 /* Called by the settings subsystem for every "apx/..." key it finds - both by
- * ZMK's own settings_load() during init and by our explicit subtree load.
+ * ZMK's own settings_load() during init and by the explicit subtree load.
  */
 static int s7_set(const char *name, size_t len, settings_read_cb read_cb,
                   void *cb_arg)
@@ -4261,7 +4252,7 @@ static void s7_run_settings(void)
 
     /* ZMK calls settings_load() during its own init, long before this thread
      * starts, so the handler may already have run. Record that separately from
-     * our own load rather than conflating the two.
+     * the explicit load rather than conflating the two.
      */
     record_s7.found_at_thread_start = s7_found ? 1u : 0u;
 
@@ -4290,7 +4281,7 @@ static void g4b_main(void *a, void *b, void *c)
 
     g4b_evidence_init();
 
-    /* Before anything of ours runs, so the values are the loader's. */
+    /* Before any application code runs, so the values are the loader's. */
     s3_twim_snapshot();
 
 #if IS_ENABLED(CONFIG_APEX_G4B_UART_EVIDENCE)
@@ -4320,9 +4311,9 @@ static void g4b_main(void *a, void *b, void *c)
 
     bringup_pins();
 
-    /* Refuse to proceed if anything we must not drive is an output. This is
-     * cheap and catches the class of mistake that would otherwise present as
-     * an unexplained silent board.
+    /* Refuse to proceed if any must-not-drive pin is an output. Catches the
+     * class of mistake that would otherwise present as an unexplained silent
+     * board.
      */
     if ((g4b_port_dir(G4B_PORT0) & G4B_MUST_BE_INPUT_MASK) != 0u) {
         record.last_error = G4B_ERR_PIN_DIR;

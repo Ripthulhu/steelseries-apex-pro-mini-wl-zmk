@@ -454,7 +454,7 @@ struct g4b_record_s3 {
     /* Version 24 records a delayed direct detach/reattach and subsequent host
      * events.
      */
-    uint32_t reattach_lowpower_before; /* LOWPOWER before we force it clear */
+    uint32_t reattach_lowpower_before; /* LOWPOWER before it is forced clear */
     uint32_t reattach_pullup_low;      /* USBPULLUP read back after writing 0 */
     uint32_t reattach_pullup_high;     /* USBPULLUP read back after writing 1 */
     uint32_t reattach_status;          /* zmk_usb_get_status() 2 s after */
@@ -727,7 +727,7 @@ struct g4b_record_s7 {
     int32_t save_rc;
 
     uint32_t found_at_thread_start; /* set by ZMK's own settings_load() */
-    uint32_t found_after_load;      /* set by our explicit subtree load */
+    uint32_t found_after_load;      /* set by the explicit subtree load */
     uint32_t counter_read;
     uint32_t counter_write;
 

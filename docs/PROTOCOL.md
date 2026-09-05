@@ -115,7 +115,7 @@ isn't in scan order — that mapping was recovered empirically from captures.
 
 The interpretation is confirmed against real presses: bit 65 is Fn, bit 17 is E,
 bit 16 is W, and holding Fn+E produced exactly `bits [17, 65]`. The stock
-firmware additionally parses a second bitmap at `rx[10..18]`; our ingest uses the
+firmware additionally parses a second bitmap at `rx[10..18]`; this ingest uses the
 first.
 
 The status byte (`rx[9]`) matches the matrix-wide travel scalar returned in

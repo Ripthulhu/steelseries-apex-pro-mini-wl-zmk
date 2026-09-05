@@ -195,20 +195,15 @@ static void mode_gate_work(struct k_work *work)
      * transport policy from a context where Bluetooth APIs are available.
      */
 #if IS_ENABLED(CONFIG_ZMK_BLE)
-    /* Edge-triggered so nothing churns every second (which made ZMK log a
-     * <dbg> transport line and a <wrn> "Not sending" every tick, flooding a debug
-     * shell). We re-select the report transport only when the desired value
-     * changes (mode or USB-host readiness).
+    /* Edge-triggered: re-select the report transport only when the desired value
+     * changes (avoids a per-tick ZMK transport log and "Not sending" warning).
      *
-     * Advertising is owned ENTIRELY by ZMK's own state machine
-     * (update_advertising() in ble.c). We must NOT call bt_le_adv_stop() or
-     * force bt_conn_disconnect() from here: ZMK ignores the preferred transport
-     * when deciding to advertise and re-runs update_advertising() on every
-     * disconnect, so a stop/disconnect issued behind its back interleaves with
-     * ZMK re-opening advertising and races the controller's LLL radio event -
-     * asserting in lll_adv.c prepare_cb (kernel oops -> self-reboot on mode
-     * switch). Setting the preferred transport is enough; a live BLE link simply
-     * stops being the report sink, which is the desired behavior. */
+     * Advertising is owned by ZMK's update_advertising() (ble.c). Do NOT call
+     * bt_le_adv_stop()/bt_conn_disconnect() here: ZMK ignores the preferred
+     * transport when deciding to advertise and re-runs on every disconnect, so a
+     * stop behind its back races the controller LLL and asserts in lll_adv.c
+     * prepare_cb (kernel oops on a mode switch). Setting the preferred transport
+     * is enough; a live BLE link just stops being the report sink. */
     static int last_want = -1;
 
     enum zmk_transport want;

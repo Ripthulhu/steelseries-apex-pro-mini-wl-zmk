@@ -3,7 +3,7 @@
  * Generated from the stock nRF image, cross-checked against the decrypted GG
  * device spec. See rgb_map_g4b.h. Two plaintext tables compose here:
  *   0x28248  LED index  -> HID usage
- *   0x2792C  scan index -> HID usage  (5x14 row-major, matches our kscan and
+ *   0x2792C  scan index -> HID usage  (5x14 row-major, matches the kscan and
  *            the 0xA2 analog ordering: scan 16/29/30/31 = W/A/S/D, verified on
  *            hardware this project)
  * so g4b_led_scan[led] = the scan index of the key under that LED, and

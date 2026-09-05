@@ -97,7 +97,7 @@ static void nor_disable(void)
      * their PIN_CNF, and disconnecting PSEL hands the pin back to GPIO still an
      * output. Restoring them (plus the bit-banged CS) to inputs leaves instance-0
      * fully idle and the pins high-Z - clean symmetry for open/close-per-op.
-     * (P0.00/P0.01 double as the LFXO's XL1/XL2; we run LFCLK on the internal RC
+     * (P0.00/P0.01 double as the LFXO's XL1/XL2; LFCLK runs on the internal RC
      * so nothing else wants them, but leaving them undriven is still correct.) */
     g4b_pin_cfg(G4B_PORT0, (enum g4b_pin)G4B_NOR_SCK, G4B_CNF_IN_NOPULL);
     g4b_pin_cfg(G4B_PORT0, (enum g4b_pin)G4B_NOR_MOSI, G4B_CNF_IN_NOPULL);
@@ -560,10 +560,10 @@ void g4b_spinor_write_test(void)
  * replay gate. Everything it calls - nor_enable/nor_disable, nor_wait_wip,
  * nor_sector_erase, nor_page_program - is a bounded busy-wait over registers and
  * the sanctioned pin helpers, with no kernel object in sight. The interrupted
- * thread (possibly an NVS op mid-transfer on this same bus) is suspended, so we
- * own SPIM0; nor_enable() re-initialises the peripheral from scratch, abandoning
- * any half-done transfer, and the WIP preflight below waits out a NOR erase or
- * program the interrupted op may have left in flight before we issue our own. */
+ * thread (possibly an NVS op mid-transfer on this same bus) is suspended, so
+ * SPIM0 is owned exclusively; nor_enable() re-initialises the peripheral from
+ * scratch, abandoning any half-done transfer, and the WIP preflight below waits
+ * out a NOR erase or program the interrupted op may have left in flight. */
 bool g4b_spinor_fault_write(uint32_t addr, const uint8_t *rec, uint32_t len)
 {
     bool ok;

@@ -38,9 +38,8 @@
 
 /* --------------------------------------------------------------- statistics
  *
- * Count key presses via ZMK's position-state event, decoupled from the scanner:
- * every key that goes down anywhere in the matrix bumps the counter. Zero cost
- * to the scan path (just an event subscription).
+ * Key-press count via ZMK's position-state event, off the scan path: every
+ * matrix key-down increments the counter.
  */
 #include <zephyr/sys/atomic.h>
 #include <zmk/event_manager.h>
@@ -48,8 +47,8 @@
 
 static atomic_t apex_keypress_count = ATOMIC_INIT(0);
 
-/* Per-keymap-position press counts, for the usage heatmap. Slight cross-thread
- * races on a uint16 are cosmetically harmless for a heatmap. */
+/* Per-keymap-position press counts for the usage heatmap. uint16 cross-thread
+ * races are acceptable here. */
 static uint16_t apex_key_counts[APEX_HEATMAP_KEYS];
 
 static int apex_stats_listener(const zmk_event_t *eh)
@@ -275,8 +274,8 @@ uint8_t apex_actuation_get_tenths(void)
 bool apex_actuation_set_tenths(uint8_t tenths)
 {
 #if IS_ENABLED(CONFIG_APEX_G4B_SPIM_KSCAN)
-    /* The ladder is discrete (6 points); step toward the target and stop when a
-     * step no longer changes the value (a ladder bound) or we reach it. */
+    /* Discrete 6-point ladder: step toward the target, stop at a ladder bound or
+     * on reaching it. */
     uint8_t cur = g4b_actuation_tenths();
     for (int guard = 0; guard < 32 && cur != tenths; guard++) {
         g4b_actuation_step(tenths > cur ? 1 : -1);
@@ -396,8 +395,7 @@ const char *apex_rgb_effect_name(uint8_t index)
 #endif
 }
 
-/* Brightness lives in ZMK's underglow subsystem; wiring it needs the underglow
- * API and is deferred to a later phase. Report 0 / no-op for now. */
+/* Brightness lives in ZMK's underglow subsystem; not wired here - report 0/no-op. */
 uint8_t apex_rgb_brightness_get(void)
 {
     return 0u;
@@ -417,12 +415,10 @@ static bool die_temp_read_mc(int32_t *out_mc)
 {
     bool ok = false;
     k_mutex_lock(&temp_lock, K_FOREVER);
-    /* This board runs the RC 32 kHz LFCLK, whose calibration also uses the TEMP
-     * peripheral: its DATARDY interrupt handler consumes the event before our
-     * poll can see it, so a naive read times out. Mask that interrupt for the
-     * duration of our one-shot measurement, then restore it. We deliberately do
-     * NOT irq_lock the wait - the conversion is ~36 us, but a busy-loop with
-     * interrupts off would stall radio/USB/timers; k_busy_wait keeps them live. */
+    /* The RC 32 kHz LFCLK calibration also uses the TEMP peripheral; its DATARDY
+     * interrupt consumes the event before the poll sees it, so a naive read times
+     * out. Mask that interrupt for the one-shot measurement, then restore it. The
+     * wait is not irq_lock'd: the ~36 us busy-wait keeps radio/USB/timers live. */
     uint32_t int_was_on =
         nrf_temp_int_enable_check(NRF_TEMP, NRF_TEMP_INT_DATARDY_MASK);
     nrf_temp_int_disable(NRF_TEMP, NRF_TEMP_INT_DATARDY_MASK);

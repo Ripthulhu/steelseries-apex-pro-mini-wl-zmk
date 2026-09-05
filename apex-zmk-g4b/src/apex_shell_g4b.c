@@ -45,7 +45,7 @@
 
 #define APEX_REG32(a) (*(volatile uint32_t *)(uintptr_t)(a))
 
-/* Active HID output transport (what key reports actually go over right now). */
+/* Active HID output transport for key reports. */
 static const char *apex_active_transport(void)
 {
 #if IS_ENABLED(CONFIG_ZMK_USB) || IS_ENABLED(CONFIG_ZMK_BLE)
@@ -570,8 +570,8 @@ static int cmd_link(const struct shell *sh, size_t argc, char **argv)
      * to the keyboard loop - do NOT read these as live activity. */
     shell_print(sh, "  boot handshake : %u/%u frames matched (%u%%)",
                 s.frames_matched, s.frames_run, mpct);
-    /* Live: these climb while the keyboard loop runs. key events rises each time
-     * you press or release a key; keepalives tick on idle 0xA0 polls. */
+    /* Live counters from the keyboard loop: key events per accepted state change,
+     * keepalives on idle 0xA0 polls. */
     shell_print(sh, "  key events     : %u (live)", s.live_key_events);
     shell_print(sh, "  idle keepalives: %u (live)", s.live_keepalives);
     return 0;
@@ -613,10 +613,8 @@ static int cmd_depth(const struct shell *sh, size_t argc, char **argv)
     return 0;
 }
 
-/* Full raw-Hall sweep of all 70 scan slots, unfiltered - for measuring crosstalk
- * coupling (0x36 topology). Uses the same in-loop 0xA2 sampling as `apex depth`
- * (no desync). Read once at rest and once with a key held; the slots whose raw
- * value shifts are that key's electromagnetic neighbours. */
+/* Full unfiltered raw-Hall sweep of all 70 scan slots, for scanner RE. Uses the
+ * same in-loop 0xA2 sampling as `apex depth`. */
 static int cmd_halldump(const struct shell *sh, size_t argc, char **argv)
 {
     ARG_UNUSED(argc);
@@ -642,14 +640,14 @@ static int cmd_halldump(const struct shell *sh, size_t argc, char **argv)
 #endif
 
 #if IS_ENABLED(CONFIG_APEX_G4B_SPIM_KSCAN)
-/* Raw STM32 scanner frame probe - the debug lever for the link protocol. Send an
- * opcode (+ optional args) as hex; print the 64-byte reply. Examples:
+/* Send a raw opcode (+ optional hex args) to the STM32 scanner; print the 64-byte
+ * reply. Examples:
  *   apex scanraw 90        version query -> ASCII "3.24.1"
  *   apex scanraw a1        key bitmap (9 bytes)
  *   apex scanraw 20        query scanner state
  *   apex scanraw a2 08 00  read 8 per-key Hall samples from index 0
- * The exchange runs on the g4b thread (single-writer safe). Opcodes 0x01/0x02/
- * 0x32 are refused (scanner reset / power poke / flash write - see PROTOCOL.md). */
+ * Runs on the g4b thread (single-writer). Opcodes 0x01/0x02/0x32 (reset / power /
+ * flash write) are refused - see PROTOCOL.md. */
 static int cmd_scanraw(const struct shell *sh, size_t argc, char **argv)
 {
     uint8_t tx[64] = {0};

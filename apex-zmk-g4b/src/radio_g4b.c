@@ -19,7 +19,7 @@
 #include "radio_esb_g4b.h"
 #endif
 
-/* Bounded wait for the async bt_enable() to finish before we tear it down. The
+/* Bounded wait for the async bt_enable() to finish before teardown. The
  * stack is normally ready within a few hundred ms of boot. */
 #define G4B_STANDDOWN_POLL_MS 50u
 #define G4B_STANDDOWN_MAX_MS  4000u
@@ -105,7 +105,7 @@ static void standdown_work_fn(struct k_work *work)
 	standdown_emit();
 
 #if IS_ENABLED(CONFIG_APEX_G4B_ESB)
-	/* Radio is ours: bring up HFXO, apply the vendor PHY config, report it. */
+	/* RADIO now free for ESB: bring up HFXO, apply the vendor PHY config, report it. */
 	if (status.stood_down) {
 		g4b_esb_on_radio_free();
 	}

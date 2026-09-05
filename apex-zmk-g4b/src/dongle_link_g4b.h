@@ -25,7 +25,7 @@
 #include "kscan_g4b.h" /* APEX_G4B_KEY_BITMAP_SIZE */
 
 /* Release the operational-link thread. Called from g4b_esb_on_radio_free() in a
- * DONGLE_LINK build, in place of the pairing probe, once NRF_RADIO is ours and
+ * DONGLE_LINK build, in place of the pairing probe, once NRF_RADIO is free and
  * the vendor PHY is applied. Assumes the receiver is already bonded to this
  * keyboard (the bond survives reboots), so it goes straight to the operational
  * A0/90/90 counter exchange rather than repeating pairing. */
