@@ -495,6 +495,26 @@ static const uint8_t g4b_reset_gaps[] = { 2u, 4u, 6u, 8u };
 static uint8_t s3_reset_gap = G4B_RESET_GAP_DEFAULT;
 
 static uint8_t s3_act_step = G4B_ACT_STEP_DEFAULT;
+
+/* Per-key actuation override, indexed by STM32 scan index. 0 = use the global
+ * point; otherwise the depth in tenths of a millimetre (2..38 = 0.2..3.8 mm). The
+ * 0 sentinel lets the static zero-init mean "every key follows the global point".
+ * Unlike the global control (a 6-point ladder), per-key spans the scanner's full
+ * travel range via g4b_tenths_to_index[] below. The RE showed the 0x30/0x33 frames
+ * address keys individually via their {start,count} header, so we can give each key
+ * its own actuation point on the same wire path. */
+static uint8_t s3_perkey_tenths[APEX_G4B_KEY_COUNT];
+
+/* Actuation depth (tenths of a mm, 0..38) -> travel-table index, read from the
+ * STM32 3.24.1 travel table at 0x0800D3E0. Lets per-key actuation use the whole
+ * 0.2..3.8 mm range instead of the six global ladder points. */
+static const uint8_t g4b_tenths_to_index[39] = {
+    0u,   0u,   4u,   4u,   5u,   6u,   8u,   10u,  12u,  14u,  /* 0.. */
+    16u,  19u,  21u,  24u,  26u,  29u,  32u,  35u,  38u,  42u,  /* 10.. */
+    46u,  50u,  54u,  59u,  64u,  70u,  76u,  83u,  91u,  100u, /* 20.. */
+    110u, 120u, 132u, 144u, 156u, 168u, 180u, 194u, 211u,      /* 30..38 */
+};
+
 static uint8_t s3_rt_tenths = CONFIG_APEX_G4B_RAPID_TRIGGER;
 static uint8_t s3_rt_last_on =
     (CONFIG_APEX_G4B_RAPID_TRIGGER > 0) ? CONFIG_APEX_G4B_RAPID_TRIGGER : 3;
@@ -661,8 +681,21 @@ static void s2_apply_actuation(uint8_t *tx)
         return;
     }
 
+    uint32_t start = tx[2]; /* this frame writes keys start..start+count-1 */
+
     for (uint32_t k = 0u; k < count; k++) {
-        uint8_t press = g4b_act_steps[s3_act_step];
+        uint32_t key = start + k;
+        uint8_t press = g4b_act_steps[s3_act_step]; /* global default */
+
+        /* A per-key override (depth in tenths) wins for that key, mapped through
+         * the scanner's travel table so it can reach the full 0.2..3.8 mm range. */
+        if (key < ARRAY_SIZE(s3_perkey_tenths) && s3_perkey_tenths[key] != 0u) {
+            uint8_t t = s3_perkey_tenths[key];
+
+            if (t < ARRAY_SIZE(g4b_tenths_to_index)) {
+                press = g4b_tenths_to_index[t];
+            }
+        }
 
         tx[G4B_THRESH_HEADER + k * 2u] = press;
         tx[G4B_THRESH_HEADER + k * 2u + 1u] =
@@ -1625,6 +1658,7 @@ static void g4b_settings_save_work(struct k_work *work)
 
     ARG_UNUSED(work);
     (void)settings_save_one("apex/switch", &st, sizeof(st));
+    (void)settings_save_one("apex/perkey", s3_perkey_tenths, sizeof(s3_perkey_tenths));
 }
 
 /* Debounced, deliberately. Every one of these controls is a key someone will
@@ -1642,6 +1676,23 @@ static int g4b_settings_set(const char *name, size_t len,
 {
     struct g4b_switch_settings st;
     const char *next;
+
+    /* Per-key actuation overrides (one byte per scan index; 0 = global, else the
+     * depth in tenths of a mm, 2..38). Each entry is range-checked before use. */
+    if (settings_name_steq(name, "perkey", &next) && next == NULL) {
+        uint8_t buf[ARRAY_SIZE(s3_perkey_tenths)];
+
+        if (len != sizeof(buf)) {
+            return -EINVAL;
+        }
+        if (read_cb(cb_arg, buf, sizeof(buf)) < 0) {
+            return -EIO;
+        }
+        for (uint32_t i = 0u; i < sizeof(buf); i++) {
+            s3_perkey_tenths[i] = (buf[i] >= 2u && buf[i] <= 38u) ? buf[i] : 0u;
+        }
+        return 0;
+    }
 
     if (!settings_name_steq(name, "switch", &next) || next != NULL) {
         return -ENOENT;
@@ -1721,6 +1772,59 @@ void g4b_actuation_step(int delta)
     s3_act_step = (uint8_t)step;
     s3_cfg_dirty = 1u;
     g4b_settings_mark_dirty();
+}
+
+/* --- Per-key actuation overrides ---------------------------------------- */
+
+/* Set (tenths in 2..38 = 0.2..3.8 mm) or clear (tenths == 0) a single key's
+ * actuation override. key is the STM32 scan index. Returns 0, or -EINVAL if the
+ * key is out of range. Re-pushes the thresholds and persists like the globals. */
+int g4b_act_key_set(uint32_t key, uint8_t tenths)
+{
+    if (key >= ARRAY_SIZE(s3_perkey_tenths)) {
+        return -EINVAL;
+    }
+    if (tenths != 0u) {
+        if (tenths < 2u) {
+            tenths = 2u;   /* 0.2 mm is the shallowest the travel table resolves */
+        } else if (tenths > 38u) {
+            tenths = 38u;  /* 3.8 mm = full travel */
+        }
+    }
+    if (tenths == s3_perkey_tenths[key]) {
+        return 0;
+    }
+    s3_perkey_tenths[key] = tenths;
+    s3_cfg_dirty = 1u;          /* re-send 0x30/0x33 with the new per-key value */
+    g4b_settings_mark_dirty();
+    return 0;
+}
+
+/* Effective actuation depth (tenths) for a key - its override if set, else the
+ * global point. */
+uint8_t g4b_act_key_tenths(uint32_t key)
+{
+    if (key < ARRAY_SIZE(s3_perkey_tenths) && s3_perkey_tenths[key] != 0u) {
+        return s3_perkey_tenths[key];
+    }
+    return g4b_actuation_tenths();
+}
+
+bool g4b_act_key_is_override(uint32_t key)
+{
+    return key < ARRAY_SIZE(s3_perkey_tenths) && s3_perkey_tenths[key] != 0u;
+}
+
+uint32_t g4b_act_key_override_count(void)
+{
+    uint32_t n = 0u;
+
+    for (uint32_t i = 0u; i < ARRAY_SIZE(s3_perkey_tenths); i++) {
+        if (s3_perkey_tenths[i] != 0u) {
+            n++;
+        }
+    }
+    return n;
 }
 
 void g4b_rapid_trigger_step(int delta)

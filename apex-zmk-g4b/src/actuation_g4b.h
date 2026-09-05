@@ -27,6 +27,15 @@
  */
 void g4b_actuation_step(int delta);
 
+/* Per-key actuation overrides, keyed by STM32 scan index (0..APEX_G4B_KEY_COUNT-1).
+ * g4b_act_key_set snaps `tenths` to the ladder and re-pushes the thresholds; a
+ * tenths of 0 clears the override so the key follows the global point again.
+ * g4b_act_key_tenths returns the key's effective depth (override or global). */
+int      g4b_act_key_set(uint32_t key, uint8_t tenths);
+uint8_t  g4b_act_key_tenths(uint32_t key);
+bool     g4b_act_key_is_override(uint32_t key);
+uint32_t g4b_act_key_override_count(void);
+
 /* Adjust rapid trigger sensitivity in tenths of a millimetre, clamped to the
  * scanner's 1..40. It will not step down into 0 - switching the feature off is
  * the toggle's job, so that leaning on the decrement key cannot disable it.

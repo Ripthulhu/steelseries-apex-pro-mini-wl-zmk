@@ -21,7 +21,8 @@
 #endif
 #if IS_ENABLED(CONFIG_APEX_G4B_SPIM_KSCAN)
 #include "mode_g4b.h"
-#include "actuation_g4b.h" /* link stats + per-key depth */
+#include "actuation_g4b.h" /* link stats + per-key depth + per-key actuation */
+#include "kscan_g4b.h"      /* APEX_G4B_KEY_COUNT */
 #endif
 #if IS_ENABLED(CONFIG_APEX_G4B_COREDUMP)
 #include "coredump_g4b.h"
@@ -152,16 +153,60 @@ static int cmd_charge(const struct shell *sh, size_t argc, char **argv)
 
 static int cmd_act(const struct shell *sh, size_t argc, char **argv)
 {
+    /* apex act show  -> global point + every per-key override */
+    if (argc >= 2 && !strcmp(argv[1], "show")) {
+        uint8_t g = apex_actuation_get_tenths();
+        shell_print(sh, "global actuation: %u.%u mm", g / 10u, g % 10u);
+        shell_print(sh, "per-key overrides: %u", (unsigned)g4b_act_key_override_count());
+        for (uint32_t k = 0u; k < APEX_G4B_KEY_COUNT; k++) {
+            if (g4b_act_key_is_override(k)) {
+                uint8_t t = g4b_act_key_tenths(k);
+                shell_print(sh, "  key %2u: %u.%u mm", (unsigned)k, t / 10u, t % 10u);
+            }
+        }
+        return 0;
+    }
+
+    /* apex act <key> <mm|off>  -> per-key override (key = STM32 scan index) */
+    if (argc >= 3) {
+        char *end = NULL;
+        unsigned long key = strtoul(argv[1], &end, 10);
+        uint8_t t = 0u;
+
+        if (end == argv[1]) {
+            shell_error(sh, "usage: apex act <key 0..%u> <mm|off>", APEX_G4B_KEY_COUNT - 1u);
+            return -EINVAL;
+        }
+        if (strcmp(argv[2], "off") != 0) {
+            if (!parse_mm_tenths(argv[2], &t) || t == 0u) {
+                shell_error(sh, "usage: apex act <key> <mm|off>  (e.g. apex act 33 1.2)");
+                return -EINVAL;
+            }
+        }
+        if (g4b_act_key_set((uint32_t)key, t) != 0) {
+            shell_error(sh, "key %lu out of range (0..%u)", key, APEX_G4B_KEY_COUNT - 1u);
+            return -EINVAL;
+        }
+        if (t == 0u) {
+            shell_print(sh, "key %lu actuation cleared (follows global)", key);
+        } else {
+            shell_print(sh, "key %lu actuation: %u.%u mm", key, t / 10u, t % 10u);
+        }
+        return 0;
+    }
+
+    /* apex act <mm>  -> global point (snaps to the ladder) */
     if (argc >= 2) {
         uint8_t t;
         if (!parse_mm_tenths(argv[1], &t)) {
-            shell_error(sh, "usage: apex act <mm>  (e.g. 1.5)");
+            shell_error(sh, "usage: apex act <mm> | <key> <mm|off> | show");
             return -EINVAL;
         }
         apex_actuation_set_tenths(t);
     }
     uint8_t cur = apex_actuation_get_tenths();
-    shell_print(sh, "actuation: %u.%u mm", cur / 10u, cur % 10u);
+    shell_print(sh, "actuation: %u.%u mm  (per-key: %u overridden - 'apex act show')",
+                cur / 10u, cur % 10u, (unsigned)g4b_act_key_override_count());
     return 0;
 }
 
@@ -827,9 +872,11 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
               "(pack rated max). limit: 80=4096mV, 100=4352mV.",
               cmd_charge),
     SHELL_CMD(act, NULL,
-              "Actuation point (global).\n"
-              "Usage: apex act [<mm>]   e.g. apex act 1.5\n"
-              "No args prints current. Snaps to the switch ladder (1.0-3.0 mm).",
+              "Actuation point - global (ladder 1.0-3.0 mm) or per-key (full 0.2-3.8 mm).\n"
+              "Usage: apex act [<mm>]                 global, e.g. apex act 1.5\n"
+              "       apex act <key> <mm>             per-key (key = scan index 0-69)\n"
+              "       apex act <key> off              clear a key's override\n"
+              "       apex act show                   list global + all overrides",
               cmd_act),
     SHELL_CMD(rt, NULL,
               "Rapid trigger.\n"
