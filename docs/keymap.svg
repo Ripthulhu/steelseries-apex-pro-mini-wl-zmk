@@ -13,11 +13,16 @@
     .small { fill: #9aa6b8; font: 13px "Segoe UI", Arial, sans-serif; }
     .label { fill: #f4f7fb; font: 700 16px "Segoe UI", Arial, sans-serif; }
     .note { fill: #b9c3d1; font: 14px "Segoe UI", Arial, sans-serif; }
-    .nav { fill: #56d4e8; }
-    .light { fill: #c786ff; }
-    .switch { fill: #ffc24b; }
-    .bt { fill: #72adff; }
-    .media { fill: #5de0a2; }
+    /* Label colours match the per-key legend the firmware lights while Fn is
+       held (src/rgb_overlay_g4b.c). */
+    .nav { fill: #56d4e8; }      /* navigation / arrows: cyan */
+    .light { fill: #ff8a3d; }    /* RGB hue / effect / brightness: orange */
+    .switch { fill: #ffc24b; }   /* actuation: amber */
+    .bt { fill: #72adff; }       /* Bluetooth: blue */
+    .media { fill: #ff5aa8; }    /* media transport: magenta */
+    .toggle { fill: #4bd968; }   /* on/off modes: green on, red off */
+    .batt { fill: #4bd968; }     /* battery gauge: green/amber/red by level */
+    .dim { fill: #b8c0cc; }      /* dim white (Esc) */
     .system { fill: #ff737d; }
     .fnkey { fill: #ff9b54; }
   </style>
@@ -28,28 +33,29 @@
   <rect class="panel" x="24" y="96" width="1312" height="422" rx="18"/>
 
   <!-- Number row -->
-  <g transform="translate(40 112)"><rect class="key" width="82" height="68" rx="8"/><circle class="system" cx="72" cy="10" r="4"/><text class="base" x="10" y="21">Esc</text><text class="fn nav" x="10" y="50">`</text></g>
-  <g transform="translate(130 112)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">1</text><text class="fn nav" x="10" y="50">F1</text></g>
-  <g transform="translate(220 112)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">2</text><text class="fn nav" x="10" y="50">F2</text></g>
-  <g transform="translate(310 112)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">3</text><text class="fn nav" x="10" y="50">F3</text></g>
-  <g transform="translate(400 112)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">4</text><text class="fn nav" x="10" y="50">F4</text></g>
-  <g transform="translate(490 112)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">5</text><text class="fn nav" x="10" y="50">F5</text></g>
-  <g transform="translate(580 112)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">6</text><text class="fn nav" x="10" y="50">F6</text></g>
-  <g transform="translate(670 112)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">7</text><text class="fn nav" x="10" y="50">F7</text></g>
-  <g transform="translate(760 112)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">8</text><text class="fn nav" x="10" y="50">F8</text></g>
-  <g transform="translate(850 112)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">9</text><text class="fn nav" x="10" y="50">F9</text></g>
-  <g transform="translate(940 112)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">0</text><text class="fn nav" x="10" y="50">F10</text></g>
-  <g transform="translate(1030 112)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">−</text><text class="fn nav" x="10" y="50">F11</text></g>
-  <g transform="translate(1120 112)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">=</text><text class="fn nav" x="10" y="50">F12</text></g>
+  <g transform="translate(40 112)"><rect class="key" width="82" height="68" rx="8"/><circle class="system" cx="72" cy="10" r="4"/><text class="base" x="10" y="21">Esc</text><text class="fn dim" x="10" y="50">`</text></g>
+  <!-- Number row 1..= is a battery gauge while Fn is held; the keys still type F1..F12. -->
+  <g transform="translate(130 112)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">1</text><text class="fn batt" x="10" y="50">F1</text></g>
+  <g transform="translate(220 112)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">2</text><text class="fn batt" x="10" y="50">F2</text></g>
+  <g transform="translate(310 112)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">3</text><text class="fn batt" x="10" y="50">F3</text></g>
+  <g transform="translate(400 112)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">4</text><text class="fn batt" x="10" y="50">F4</text></g>
+  <g transform="translate(490 112)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">5</text><text class="fn batt" x="10" y="50">F5</text></g>
+  <g transform="translate(580 112)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">6</text><text class="fn batt" x="10" y="50">F6</text></g>
+  <g transform="translate(670 112)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">7</text><text class="fn batt" x="10" y="50">F7</text></g>
+  <g transform="translate(760 112)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">8</text><text class="fn batt" x="10" y="50">F8</text></g>
+  <g transform="translate(850 112)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">9</text><text class="fn batt" x="10" y="50">F9</text></g>
+  <g transform="translate(940 112)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">0</text><text class="fn batt" x="10" y="50">F10</text></g>
+  <g transform="translate(1030 112)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">−</text><text class="fn batt" x="10" y="50">F11</text></g>
+  <g transform="translate(1120 112)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">=</text><text class="fn batt" x="10" y="50">F12</text></g>
   <g transform="translate(1210 112)"><rect class="key" width="110" height="68" rx="8"/><text class="base" x="10" y="21">Backspace</text><text class="fn nav" x="10" y="50">Delete</text></g>
 
   <!-- QWERTY row -->
   <g transform="translate(40 192)"><rect class="key" width="100" height="68" rx="8"/><text class="base" x="10" y="21">Tab</text><text class="muted" x="10" y="50">unchanged</text></g>
   <g transform="translate(148 192)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">Q</text><text class="fn switch" x="10" y="50">Reset dist.</text></g>
   <g transform="translate(238 192)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">W</text><text class="fn nav" x="10" y="50">↑</text></g>
-  <g transform="translate(328 192)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">E</text><text class="fn light" x="10" y="50">RGB on/off</text></g>
+  <g transform="translate(328 192)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">E</text><text class="fn toggle" x="10" y="50">RGB on/off</text></g>
   <g transform="translate(418 192)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">R</text><text class="fn light" x="10" y="50">Prev ZMK FX</text></g>
-  <g transform="translate(508 192)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">T</text><text class="fn switch" x="10" y="50">Rapid trig.</text></g>
+  <g transform="translate(508 192)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">T</text><text class="fn toggle" x="10" y="50">Rapid trig.</text></g>
   <g transform="translate(598 192)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">Y</text><text class="fn light" x="10" y="50">Hue −</text></g>
   <g transform="translate(688 192)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">U</text><text class="fn light" x="10" y="50">Hue +</text></g>
   <g transform="translate(778 192)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">I</text><text class="fn switch" x="10" y="50">Shallower</text></g>
@@ -62,7 +68,7 @@
   <!-- Home row -->
   <g transform="translate(40 272)"><rect class="key" width="112" height="68" rx="8"/><text class="base fnkey" x="10" y="21">Fn</text><text class="small" x="10" y="39">Caps position</text><text class="muted" x="10" y="58">hold</text></g>
   <g transform="translate(160 272)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">A</text><text class="fn nav" x="10" y="50">←</text></g>
-  <g transform="translate(250 272)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">S</text><text class="fn nav" x="10" y="50">↓</text></g>
+  <g transform="translate(250 272)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">S</text><text class="fn toggle" x="10" y="50">↓ Studio</text></g>
   <g transform="translate(340 272)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">D</text><text class="fn nav" x="10" y="50">→</text></g>
   <g transform="translate(430 272)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">F</text><text class="fn bt" x="10" y="50">BT 1</text></g>
   <g transform="translate(520 272)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">G</text><text class="fn bt" x="10" y="50">BT 2</text></g>
@@ -76,8 +82,8 @@
 
   <!-- Bottom letter row -->
   <g transform="translate(40 352)"><rect class="key" width="148" height="68" rx="8"/><text class="base" x="10" y="21">Left Shift</text><text class="muted" x="10" y="50">unchanged</text></g>
-  <g transform="translate(196 352)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">Z</text><text class="fn switch" x="10" y="50">Gamepad</text></g>
-  <g transform="translate(286 352)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">X</text><text class="fn light" x="10" y="50">Custom FX</text></g>
+  <g transform="translate(196 352)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">Z</text><text class="fn toggle" x="10" y="50">Gamepad</text></g>
+  <g transform="translate(286 352)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">X</text><text class="fn switch" x="10" y="50">Custom FX</text></g>
   <g transform="translate(376 352)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">C</text><text class="fn light" x="10" y="50">Bright. −</text></g>
   <g transform="translate(466 352)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">V</text><text class="fn light" x="10" y="50">Bright. +</text></g>
   <g transform="translate(556 352)"><rect class="key" width="82" height="68" rx="8"/><text class="base" x="10" y="21">B</text><text class="fn media" x="10" y="50">Volume −</text></g>
@@ -99,21 +105,23 @@
   <g transform="translate(1218 432)"><rect class="key" width="102" height="68" rx="8"/><circle class="system" cx="92" cy="10" r="4"/><text class="base" x="10" y="21">Right Ctrl</text><text class="muted" x="10" y="50">unchanged</text></g>
 
   <!-- Legend -->
-  <circle class="bt" cx="48" cy="548" r="5"/><text class="small" x="60" y="553">Bluetooth</text>
-  <circle class="light" cx="170" cy="548" r="5"/><text class="small" x="182" y="553">Lighting</text>
-  <circle class="switch" cx="270" cy="548" r="5"/><text class="small" x="282" y="553">Hall settings</text>
-  <circle class="nav" cx="404" cy="548" r="5"/><text class="small" x="416" y="553">Navigation</text>
-  <circle class="media" cx="520" cy="548" r="5"/><text class="small" x="532" y="553">Media</text>
-  <circle class="system" cx="600" cy="548" r="5"/><text class="small" x="612" y="553">System</text>
+  <text class="small" x="40" y="553">Fn-held LED colour:</text>
+  <circle class="bt" cx="212" cy="548" r="5"/><text class="small" x="224" y="553">Bluetooth</text>
+  <circle class="light" cx="322" cy="548" r="5"/><text class="small" x="334" y="553">RGB adjust</text>
+  <circle class="switch" cx="446" cy="548" r="5"/><text class="small" x="458" y="553">Actuation</text>
+  <circle class="nav" cx="558" cy="548" r="5"/><text class="small" x="570" y="553">Navigation</text>
+  <circle class="media" cx="684" cy="548" r="5"/><text class="small" x="696" y="553">Media</text>
+  <circle class="toggle" cx="770" cy="548" r="5"/><circle class="system" cx="784" cy="548" r="5"/><text class="small" x="798" y="553">Mode on / off</text>
+  <circle class="batt" cx="962" cy="548" r="5"/><circle class="switch" cx="976" cy="548" r="5"/><circle class="system" cx="990" cy="548" r="5"/><text class="small" x="1004" y="553">Battery high → low</text>
 
   <!-- Notes -->
   <g transform="translate(24 576)">
     <rect class="panel" width="312" height="174" rx="14"/>
-    <text class="label" x="18" y="32">Fn keys</text>
-    <text class="note" x="18" y="62">Use either Fn key for the coloured</text>
-    <text class="note" x="18" y="84">actions. The left one occupies the</text>
-    <text class="note" x="18" y="106">Caps Lock position.</text>
-    <text class="note" x="18" y="140">Caps Lock is not assigned.</text>
+    <text class="label" x="18" y="32">Fn lighting</text>
+    <text class="note" x="18" y="62">Hold Fn to light each key by the</text>
+    <text class="note" x="18" y="84">legend. Mode keys are green on /</text>
+    <text class="note" x="18" y="106">red off and flash twice on a toggle.</text>
+    <text class="note" x="18" y="140">Number row is a battery gauge.</text>
   </g>
   <g transform="translate(348 576)">
     <rect class="panel" width="312" height="174" rx="14"/>
