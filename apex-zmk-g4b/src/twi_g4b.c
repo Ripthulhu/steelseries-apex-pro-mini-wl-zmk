@@ -57,17 +57,8 @@
 #define G4B_BQ_BATV_STEP_MV   20u
 #define G4B_BQ_ICHGR_STEP_MA  50u   /* REG12 readback, 50 mA per count */
 
-/* REG06 bits 7:2 are VREG, offset 3840 mV in 16 mV steps; bit 1 BATLOWV (1 =
- * 3.0 V), bit 0 VRECHG (0 = 100 mV). 0x42 therefore decodes as:
- *     (0x42 >> 2) = 0x10 = 16  ->  3840 + 16*16 = 4096 mV
- * which is a deliberately low charge ceiling for cell longevity, NOT the pack's
- * rated 4.400 V maximum. The cell is soldered into a keyboard that spends much
- * of its life plugged in, and a lithium cell held near its rated top voltage is
- * the classic cause of the swelling this pack is known for. 4.096 V (the nearest
- * 16 mV step to a 4.10 V target) keeps it well off that top rail. The low two
- * bits are the same as stock's: BATLOWV = 1, VRECHG = 0. Asserted rather than
- * commented, because a wrong constant here would overcharge the cell.
- */
+/* REG06: 3840 mV + 16 * 16 mV = 4096 mV. Keep BATLOWV=1 and VRECHG=0.
+ * This is a reduced charge ceiling, not a calibrated 80% capacity measurement. */
 #define G4B_BQ_VREG_4096MV 0x42u
 BUILD_ASSERT(3840u + ((G4B_BQ_VREG_4096MV >> 2) * 16u) == 4096u,
              "REG06 constant must decode to 4096 mV, the longevity ceiling");
@@ -292,13 +283,7 @@ bool g4b_bq_configure_charge(void)
         return false;
     }
 
-    /* 4.096 V, a longevity ceiling well below the pack's 4.400 V rated maximum
-     * and below even the 4.208 V power-on default. Fuji 4867A0, 5870 mAh,
-     * 3.85 V nominal - a high-voltage cell, and high-voltage cells swell fastest
-     * when parked near their top voltage, which an always-plugged-in keyboard
-     * does continuously. Charging to 4.096 V instead trades roughly a quarter of
-     * the runtime for a cell that stays flat. See G4B_BQ_VREG_4096MV.
-     */
+    /* Apply the reduced voltage ceiling before setting the charge current. */
     if (!bq_write(G4B_BQ_REG_VREG, G4B_BQ_VREG_4096MV)) {
         return false;
     }

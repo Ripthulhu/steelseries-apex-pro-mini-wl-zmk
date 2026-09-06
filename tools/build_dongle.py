@@ -39,6 +39,12 @@ def main():
         # Preserve the venv interpreter path: resolving its symlink loses the environment.
         return subprocess.call([str(python), str(Path(__file__).resolve()), *sys.argv[1:]])
     lock = json.loads((ROOT / 'dependencies.lock.json').read_text())
+    # The receiver must distinguish successful HID transfers from cancellations.
+    from setup_workspace import apply_patch
+    hid_patch = 'apex-zmk-g4b/patches/0006-hid-input-completion-status.patch'
+    if hashlib.sha256((ROOT / hid_patch).read_bytes()).hexdigest() != lock['patches'][hid_patch]:
+        raise RuntimeError('HID completion patch does not match dependencies.lock.json')
+    apply_patch(workspace, ROOT / hid_patch)
     revisions = {'zephyr': lock['repositories']['zephyr']['revision'],
                  'modules/hal/nordic': lock['repositories']['hal_nordic']['revision'],
                  'modules/hal/cmsis': lock['west_revisions']['modules/hal/cmsis'],

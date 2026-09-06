@@ -148,9 +148,30 @@ The receiver stays connected to USB when the keyboard disconnects and queues
 release reports after a 100 ms link timeout. USB cancellation and host
 suspend/resume handling still need testing.
 
-Reports stay queued until acknowledged after USB submission. Retries use fresh
+Reports stay queued until the USB transfer completes successfully. Failed or
+cancelled transfers are retried; `dongle hid_status` counts them as
+`transfer_errors`. Retries use fresh
 encrypted packet counters. A new session discards old transitions and sends the
 current state. Replies carry host lock-key LED state back to ZMK.
+
+A successful USB completion wakes the radio thread to acknowledge that report
+without waiting for a retransmission. The reply still waits for a permitted
+hopping window. `dongle radio_test` reports `completion_tx` and the maximum
+USB-completion-to-ACK-transmission time; `dongle hid_status` reports the maximum
+USB submission-to-completion time. These are separate intervals, not measurements
+from physical keypress to application response.
+
+The first submission waits for USB completion before replying; if the keyboard
+retries while USB is still busy, the receiver replies with the last delivered
+sequence to keep the link alive without dropping the pending report.
+
+On battery, dongle mode now shares the keyboard's Bluetooth idle policy: scanner
+periods of 50 ms after five seconds and 255 ms after a minute, plus RGB shutdown
+after 30 seconds. A key wakes the scanner thread through ATTN. USB power disables
+scanner throttling; a charge-only source still permits the RGB timeout. The radio
+itself still runs the active test schedule, so this does not provide Bluetooth's
+radio power savings. Radio duty cycling and dongle-mode System OFF remain to be
+implemented and measured.
 
 The current schedule uses 20 ms channel slots and a 5 ms input retry interval
 inside guarded transmit windows. It is not the planned 1 kHz scheduler, and
@@ -175,3 +196,13 @@ locally. Neither measures end-to-end input latency.
 The older `--radio-probe` build is a fixed-channel, keepalive-only experiment.
 It requires `g4b_radio_probe.conf` on the keyboard and does not carry keypresses.
 Do not mix it with the input builds above.
+
+The HID completion regression test runs on a computer with Python and a C
+compiler (`cc`, or select one with `--cc`):
+
+```sh
+python dongle/tests/test_hid_completion.py
+```
+
+It checks failed transfers, key-release retries and completions from an old
+session. These tests do not replace USB suspend/resume tests on hardware.

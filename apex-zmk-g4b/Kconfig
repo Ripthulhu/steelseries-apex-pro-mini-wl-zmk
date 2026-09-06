@@ -402,19 +402,19 @@ config APEX_G4B_FN_OVERLAY
 	  effect is untouched and repaints the moment Fn is released.
 
 config APEX_G4B_RGB_IDLE_MS
-	int "Begin fading RGB after this many ms of key idle in Bluetooth mode"
+	int "Begin fading RGB after this many ms of wireless key idle"
 	default 30000
 	range 0 3600000
 	depends on ZMK_RGB_UNDERGLOW
 	help
-	  Applies while the switch is in Bluetooth mode and USB HID is not active.
+	  Applies in Bluetooth or dongle mode while USB HID is not active.
 	  After the timeout, the LEDs fade to black over about 10 seconds. The
 	  firmware then parks SPIM2 and switches off both LED rails. Key activity
 	  restores the rail and fades the existing frame back in.
 
 	  This does not call zmk_rgb_underglow_off() or change the saved underglow
 	  state. A charge-only battery bank does not create a USB HID endpoint, so
-	  the Bluetooth timeout still applies while it powers the keyboard.
+	  the wireless timeout still applies while it powers the keyboard.
 
 	  0 disables the timeout.
 
@@ -559,11 +559,12 @@ config APEX_G4B_IDLE_POLL_MS
 	  Wait on the P0.24 ATTN semaphore once idle, waking immediately on a key.
 	  This value is only the timeout used to service background housekeeping
 	  when no edge arrives; it does not add input latency. The permanent
-	  keyboard loop applies the longer wait only in Bluetooth mode, leaving USB
+	  keyboard loop applies the longer wait in battery-powered Bluetooth and
+	  dongle modes, leaving USB
 	  at its original cadence.
 
 config APEX_G4B_STM32_IDLE_SCAN_PERIOD_MS
-	int "Bluetooth-idle STM32 scan period in milliseconds (0 = disabled)"
+	int "Wireless-idle STM32 scan period in milliseconds (0 = disabled)"
 	default 0
 	range 0 255
 	depends on APEX_G4B_STAGE = 3
@@ -574,7 +575,7 @@ config APEX_G4B_STM32_IDLE_SCAN_PERIOD_MS
 	depends on APEX_G4B_STM32_STOP1_IDLE_MS = 0
 	help
 	  Send SET_MODE 20 03 <period-ms> after APEX_G4B_IDLE_AFTER_MS while on
-	  battery in the Bluetooth switch position. The STM32 keeps detecting keys
+	  battery in the Bluetooth or dongle switch position. The STM32 keeps detecting keys
 	  and raising ATTN, but runs its matrix/ADC pass at the alternate period.
 
 	  Composes with APEX_G4B_SLEEP_MS: the scanner is throttled through these
@@ -598,32 +599,32 @@ config APEX_G4B_STM32_IDLE_SCAN_PERIOD_MS
 	  0 disables the feature. Values greater than 1 trade first-key latency for
 	  scanner activity. The release uses 50 ms after the first idle threshold and
 	  the long-idle option below for a second tier. Key wake has been tested; the
-	  resulting current draw has not yet been measured. This never activates in
-	  USB or dongle mode.
+	  resulting current draw has not yet been measured. USB power disables it.
+	  System OFF currently remains Bluetooth-only.
 
 config APEX_G4B_STM32_LONG_IDLE_SCAN_PERIOD_MS
-	int "Bluetooth long-idle STM32 scan period in milliseconds (0 = disabled)"
+	int "Wireless long-idle STM32 scan period in milliseconds (0 = disabled)"
 	default 0
 	range 0 255
 	depends on APEX_G4B_STM32_IDLE_SCAN_PERIOD_MS > 1
 	help
 	  Optionally replace the first mode-3 idle period with a slower second tier
-	  after APEX_G4B_STM32_LONG_IDLE_AFTER_MS of continuous Bluetooth/battery
+	  after APEX_G4B_STM32_LONG_IDLE_AFTER_MS of continuous wireless battery
 	  inactivity. The STM32 protocol carries the period in one byte, so 255 ms
 	  is the maximum representable value.
 
 	  This uses the same ATTN callback, period-1 normalization, failure handling,
-	  and USB/dongle exclusion as the first idle tier. Values should be greater
+	  and USB-power exclusion as the first idle tier. Values should be greater
 	  than APEX_G4B_STM32_IDLE_SCAN_PERIOD_MS; the verifier enforces that
 	  relationship.
 
 config APEX_G4B_STM32_LONG_IDLE_AFTER_MS
-	int "Bluetooth inactivity before the long-idle scanner tier"
+	int "Wireless inactivity before the long-idle scanner tier"
 	default 60000
 	range 1000 3600000
 	depends on APEX_G4B_STM32_LONG_IDLE_SCAN_PERIOD_MS > 1
 	help
-	  Continuous battery-powered Bluetooth inactivity required before replacing
+	  Continuous battery-powered wireless inactivity required before replacing
 	  the first mode-3 cadence with the long-idle cadence. Any key/ATTN event,
 	  held key, configuration write, USB power, or mode change cancels mode 3 and
 	  restores the scanner to 1 ms before this timer can begin again.
@@ -737,11 +738,10 @@ config APEX_G4B_CHARGE_LIMIT
 	depends on APEX_G4B_TWI
 	help
 	  Take ownership of the BQ25895's charge voltage at boot and cap it at
-	  4.096 V, well below the pack's 4.400 V rated maximum. This keyboard spends
-	  much of its life plugged in, and a high-voltage lithium cell held near its
-	  top voltage is what swells it - the failure owners of this board report.
-	  Charging only to 4.096 V trades roughly a quarter of the runtime for a cell
-	  that stays flat.
+	  4.096 V, below the pack's 4.400 V rated maximum. Also limits charge current
+	  to 1472 mA (about 0.25C for the 5870 mAh pack). This trades available
+	  capacity for less time near maximum voltage; the runtime and lifespan
+	  effects have not been measured.
 
 	  This is independent of APEX_G4B_BQ_PROBE (the read-only diagnostic): the
 	  cap must apply in the shipping build, where the probe is off. The write
@@ -755,17 +755,13 @@ config APEX_G4B_CHARGE_STORAGE
 	default y
 	depends on APEX_G4B_TWI && ZMK_BATTERY_REPORTING
 	help
-	  Holds the pack in a healthy band instead of pinning it at the charge cap
-	  and nibble-recharging forever. The BQ25895's power path runs the keyboard
-	  from USB regardless (it runs with the battery removed), so when the pack is
-	  full enough the controller clears REG03 CHG_CONFIG - a true passthrough: the
-	  system stays up on USB and the cell is left idle, neither charged nor
-	  discharged. It resumes charging only once the cell sags below the resume
-	  point. Serviced off the existing ZMK battery fetch (no extra thread).
+	  Clears REG03 CHG_CONFIG at the stop threshold while the USB power path
+	  continues supplying the keyboard. Charging resumes at the lower threshold.
+	  Runs during the existing ZMK battery fetch, without another thread.
 
 	  Pairs with APEX_G4B_CHARGE_LIMIT (the 4.096 V cap is the hard ceiling; this
 	  decides when to actually charge toward it). Thresholds are percent of the
-	  pack's 4.400 V-referenced capacity, on the vendor discharge curve.
+	  stock voltage lookup table, not a measured percentage of pack capacity.
 
 config APEX_G4B_CHARGE_STOP_PCT
 	int "Stop-charging state of charge (percent of 4.4 V capacity)"

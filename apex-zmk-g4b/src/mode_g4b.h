@@ -30,6 +30,11 @@ enum g4b_mode {
 void g4b_mode_sample(void);
 
 enum g4b_mode g4b_mode_get(void);
+static inline bool g4b_mode_is_wireless(void)
+{
+    enum g4b_mode mode = g4b_mode_get();
+    return mode == G4B_MODE_BT || mode == G4B_MODE_DONGLE;
+}
 uint16_t g4b_mode_mv(void);
 
 /* Software override of the physical switch. @mode is a g4b_mode to force, or an

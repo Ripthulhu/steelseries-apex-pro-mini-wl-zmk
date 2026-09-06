@@ -112,10 +112,13 @@ static struct apex_input_queue input_queue;
 static struct k_spinlock input_lock;
 static atomic_t input_selected, resync, queue_overflows, input_acked;
 static atomic_t rx_sequence, input_delivered, duplicate_reports, usb_waits;
+static atomic_t completion_acks, completion_ack_max_us;
+static uint32_t pending_usb_sequence;
 static atomic_t link_timeouts, requested_resets;
 enum { RESET_QUEUE = 1, RESET_SELECTION = 2, RESET_COMMAND = 4, RESET_START = 8 };
 static atomic_t reset_reason, reset_at, timeout_at;
 __weak int apex_radio_deliver(const struct apex_input_frame *frame) { return -ENOTSUP; }
+__weak uint32_t apex_radio_completed(uint32_t *completed_at) { *completed_at = 0; return 0; }
 __weak void apex_radio_release(void) {}
 __weak uint8_t apex_radio_host_leds(void) { return 0; }
 __weak void apex_radio_update_leds(uint8_t leds) { ARG_UNUSED(leds); }
@@ -158,6 +161,21 @@ void apex_radio_request_session(void)
 #endif
 }
 
+void apex_radio_delivery_notify(void)
+{
+#if EVENT_RX
+    k_sem_give(&radio_event);
+#endif
+}
+
+static int input_ack(uint32_t sequence)
+{
+    uint8_t reply[6] = {APEX_INPUT_VERSION};
+    sys_put_le32(sequence, reply + 1);
+    reply[5] = apex_radio_host_leds();
+    return apex_connection_encode(&connection, APEX_PACKET_ACK, reply, sizeof(reply), tx, sizeof(tx));
+}
+
 static int input_packet(uint8_t type, const uint8_t *data, size_t length)
 {
     uint32_t ack = 0;
@@ -178,6 +196,13 @@ static int input_packet(uint8_t type, const uint8_t *data, size_t length)
             int rc = apex_radio_deliver(&frame);
             if (rc == -EAGAIN) {
                 atomic_inc(&usb_waits);
+                /* Give USB completion the first reply opportunity. Two ACKs
+                 * back-to-back can outrun the keyboard's receive rearm. A
+                 * retry still receives a liveness ACK while USB is stalled. */
+                if (pending_usb_sequence != frame.sequence) {
+                    pending_usb_sequence = frame.sequence;
+                    return 0;
+                }
                 /* Confirm radio liveness without acknowledging the pending
                  * USB report. The sender keeps retrying this sequence. */
             } else {
@@ -191,10 +216,7 @@ static int input_packet(uint8_t type, const uint8_t *data, size_t length)
     } else if (type != APEX_PACKET_KEEPALIVE || length != 1 || data[0] != APEX_INPUT_VERSION) {
         return -EINVAL;
     }
-    uint8_t reply[6] = {APEX_INPUT_VERSION};
-    sys_put_le32(ack, reply + 1);
-    reply[5] = apex_radio_host_leds();
-    return apex_connection_encode(&connection, APEX_PACKET_ACK, reply, sizeof(reply), tx, sizeof(tx));
+    return input_ack(ack);
 }
 #endif
 
@@ -352,6 +374,7 @@ static int new_session(void)
     apex_input_disconnect(&input_queue);
     k_spin_unlock(&input_lock, key);
     atomic_set(&rx_sequence, 0);
+    pending_usb_sequence = 0;
     if (local_role == APEX_RECEIVER) apex_radio_release();
 #endif
     uint8_t nonce[16];
@@ -561,6 +584,29 @@ static void probe_thread(void *a, void *b, void *c)
             }
         }
 #endif
+#if INPUT_ENABLED
+        /* USB callbacks only wake this thread. It owns the session, cipher
+         * counters and radio, including acknowledgements after USB completion. */
+        if (local_role == APEX_RECEIVER && apex_radio_input_connected()
+#if HOP_ENABLED
+            && apex_hop_link_window(&hop_link, radio_time_us())
+#endif
+            && !(receiving && NRF_RADIO->EVENTS_END)) {
+            uint32_t completed_at;
+            uint32_t sequence = apex_radio_completed(&completed_at);
+            if (sequence && sequence == (uint32_t)atomic_get(&rx_sequence) + 1) {
+                atomic_set(&rx_sequence, sequence);
+                atomic_inc(&input_delivered);
+                int n = input_ack(sequence);
+                if (n < 0) { rc = n; goto failed; }
+                rc = radio_send(tx, n, 0);
+                if (rc) goto failed;
+                atomic_inc(&completion_acks);
+                maximum(&completion_ack_max_us,
+                        k_cyc_to_us_floor32(k_cycle_get_32() - completed_at));
+            }
+        }
+#endif
         if (local_role == APEX_KEYBOARD && now >= next_send) {
             int n;
             uint64_t scheduled_end = 0;
@@ -680,6 +726,8 @@ int apex_radio_probe_status(const struct shell *sh, size_t argc, char **argv)
     shell_print(sh, "RESET reason=%ld at_ms=%ld timeout_at_ms=%ld uptime_ms=%lld",
                 (long)atomic_get(&reset_reason), (long)atomic_get(&reset_at),
                 (long)atomic_get(&timeout_at), (long long)k_uptime_get());
+    shell_print(sh, "ACK completion_tx=%ld completion_to_tx_max_us=%ld",
+                (long)atomic_get(&completion_acks), (long)atomic_get(&completion_ack_max_us));
     shell_print(sh, "AES hardware_blocks=%lu software_fallback=%lu",
                 (unsigned long)apex_aes_blocks(), (unsigned long)apex_aes_fallbacks());
 #endif

@@ -58,6 +58,15 @@ The keyboard sends a clock update in every slot. Initial guard periods leave
 room for transmission and the reply around channel changes. The remaining
 input opportunities still use a 5 ms retry interval, not a 1 kHz schedule.
 
+Receiver USB completion wakes the radio owner thread. A successful report in
+the current session can advance the input acknowledgement without waiting for
+the keyboard to retry it. Failed transfers and old-session completions cannot
+advance it. Lost acknowledgements still recover through ordinary input retries.
+Completion replies obey the same guarded window; this can delay them by about
+10 ms with the current schedule. `ACK completion_to_tx_max_us` measures from
+USB completion to the end of the local ACK transmission, not reception by the
+keyboard. USB callbacks do not run encryption or access the radio peripheral.
+
 A lost connection starts a fresh authenticated session. Input queues discard
 old transitions and send the current state. A forced receiver-session reset
 and a 500 ms USB submission stall recovered on hardware. One receiver clock

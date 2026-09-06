@@ -32,8 +32,18 @@ static uint8_t pending_type;
 static uint8_t keyboard[8], consumer[12];
 static atomic_t leds;
 static int64_t hold_until;
-static uint32_t completed[2], releases, submit_errors;
+static uint32_t completed[2], releases, submit_errors, transfer_errors;
 static uint16_t last_media_usage;
+static uint32_t submitted_at, delivered_at, usb_max_us;
+
+uint32_t apex_radio_completed(uint32_t *completed_at)
+{
+    k_spinlock_key_t key = k_spin_lock(&lock);
+    uint32_t sequence = release_mask ? 0 : delivered_sequence;
+    *completed_at = delivered_at;
+    k_spin_unlock(&lock, key);
+    return sequence;
+}
 
 void apex_radio_release(void)
 {
@@ -58,13 +68,19 @@ static void iface_ready(const struct device *dev, bool is_ready)
     apex_radio_release();
 }
 
-static void report_done(const struct device *dev, const uint8_t *data)
+static void report_done(const struct device *dev, const uint8_t *data, int status)
 {
     ARG_UNUSED(dev); ARG_UNUSED(data);
+    bool notify = false;
     k_spinlock_key_t key = k_spin_lock(&lock);
-    if (busy && pending_generation == generation) {
+    if (status) transfer_errors++;
+    if (!status && busy && pending_generation == generation) {
         delivered_sequence = pending_sequence;
         if (pending_sequence) {
+            delivered_at = k_cycle_get_32();
+            uint32_t elapsed = k_cyc_to_us_floor32(delivered_at - submitted_at);
+            if (elapsed > usb_max_us) usb_max_us = elapsed;
+            notify = true;
             completed[pending_type - 1]++;
             if (pending_type == APEX_INPUT_CONSUMER && sys_get_le16(consumer)) {
                 last_media_usage = sys_get_le16(consumer);
@@ -74,6 +90,7 @@ static void report_done(const struct device *dev, const uint8_t *data)
     }
     busy = false;
     k_spin_unlock(&lock, key);
+    if (notify) apex_radio_delivery_notify();
 }
 
 static void set_protocol(const struct device *dev, uint8_t value)
@@ -117,7 +134,7 @@ static int set_report(const struct device *dev, uint8_t type, uint8_t id,
 }
 
 static const struct hid_device_ops ops = {
-    .iface_ready = iface_ready, .input_report_done = report_done,
+    .iface_ready = iface_ready, .input_report_complete = report_done,
     .get_report = get_report, .set_report = set_report, .set_protocol = set_protocol,
 };
 
@@ -149,6 +166,7 @@ static int submit(uint32_t sequence, uint8_t type, const uint8_t *data)
     pending_sequence = sequence;
     pending_type = type;
     pending_generation = generation;
+    submitted_at = k_cycle_get_32();
     busy = true;
     k_spin_unlock(&lock, key);
     int rc = hid_device_submit_report(hid, n + prefix, report);
@@ -188,6 +206,8 @@ int receiver_hid_status(const struct shell *sh, size_t argc, char **argv)
     bool r = ready, b = busy;
     uint8_t p = protocol, mask = release_mask;
     uint32_t keys = completed[0], media = completed[1], cleared = releases, errors = submit_errors;
+    uint32_t failed = transfer_errors;
+    uint32_t usb_us = usb_max_us;
     uint16_t usage = last_media_usage;
     k_spin_unlock(&lock, key);
     shell_print(sh, "HID ready=%u busy=%u protocol=%u release_pending=%u leds=%02lx",
@@ -195,6 +215,8 @@ int receiver_hid_status(const struct shell *sh, size_t argc, char **argv)
     shell_print(sh, "HID keyboard=%lu consumer=%lu releases=%lu submit_errors=%lu last_media=%04x",
                 (unsigned long)keys, (unsigned long)media, (unsigned long)cleared,
                 (unsigned long)errors, usage);
+    shell_print(sh, "HID transfer_errors=%lu", (unsigned long)failed);
+    shell_print(sh, "HID submit_to_complete_max_us=%lu", (unsigned long)usb_us);
     return 0;
 }
 

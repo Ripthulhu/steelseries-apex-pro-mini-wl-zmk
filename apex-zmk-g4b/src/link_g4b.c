@@ -1632,19 +1632,16 @@ static void s3_rgb_idle_update(void)
 
 #if IS_ENABLED(CONFIG_ZMK_USB)
     /* A configured USB host keeps the lighting awake. A charge-only battery
-     * bank does not select USB, so Bluetooth's 30-second timeout still applies.
+     * bank does not select USB, so the wireless timeout still applies.
      */
     usb_selected = s3_usb_is_powered() &&
                    zmk_endpoint_get_selected().transport == ZMK_TRANSPORT_USB;
 #endif
 
     uint32_t now = k_uptime_get_32();
-    /* Only Bluetooth mode owns this timeout. A configured USB endpoint and the
-     * other physical switch modes keep their prior always-on behavior. In BT,
-     * the lights ease out once no key has moved for the idle window and ease
-     * back in on activity. The fade and rail cycling live in rgb_idle_tick.
-     */
-    bool want_on = g4b_mode_get() != G4B_MODE_BT || usb_selected ||
+    /* Wireless modes share the fade and rail shutdown. A selected USB data
+     * connection keeps lighting active; a charge-only cable does not. */
+    bool want_on = !g4b_mode_is_wireless() || usb_selected ||
                    (now - s3_last_activity_ms) < (uint32_t)CONFIG_APEX_G4B_RGB_IDLE_MS;
 
     g4b_rgb_idle_tick(want_on, now);
@@ -2447,7 +2444,7 @@ static bool s3_mode3_wanted(void)
 #if IS_ENABLED(CONFIG_ZMK_USB)
     powered = s3_usb_is_powered();
 #endif
-    return !powered && g4b_mode_get() == G4B_MODE_BT &&
+    return !powered && g4b_mode_is_wireless() &&
            s3_cfg_dirty == 0u && !s3_mode3_keys_down &&
            (now - s3_last_activity_ms) >=
                (uint32_t)CONFIG_APEX_G4B_IDLE_AFTER_MS &&
@@ -3405,15 +3402,12 @@ static inline void s3_bq_probe(void) {}
 #endif
 
 #if IS_ENABLED(CONFIG_APEX_G4B_AB_ROLLBACK)
-/* USB is part of the health check only when it is the active output. Wired and
- * dongle switch positions always expect USB when VBUS is present. In Bluetooth
- * mode, a charger or battery bank leaves BLE selected and must not prevent a
- * healthy boot. */
+/* A charge-only source must not prevent a healthy wireless boot. */
 static bool ab_output_ready(void)
 {
 #if IS_ENABLED(CONFIG_ZMK_USB)
     bool usb_required = s3_usb_is_powered() &&
-                        (g4b_mode_get() != G4B_MODE_BT ||
+                        (!g4b_mode_is_wireless() ||
                          zmk_endpoint_get_selected().transport ==
                              ZMK_TRANSPORT_USB);
 
@@ -3924,7 +3918,7 @@ static void s3_run_keyboard(void)
              * edge comes (the A0 keep-alive + idle work still run per pass). */
             uint32_t wait_ms = 1u;
 
-            if (idle && g4b_mode_get() == G4B_MODE_BT) {
+            if (idle && g4b_mode_is_wireless() && !s3_usb_is_powered()) {
                 /* Keep visible custom effects and fades at their actual render
                  * limit, rather than waking at 1 kHz for a 200 Hz renderer.
                  * With the LEDs blanked (or in ZMK passthrough), use the full

@@ -1,0 +1,32 @@
+diff --git a/zephyr/include/zephyr/usb/class/usbd_hid.h b/zephyr/include/zephyr/usb/class/usbd_hid.h
+--- a/zephyr/include/zephyr/usb/class/usbd_hid.h
++++ b/zephyr/include/zephyr/usb/class/usbd_hid.h
+@@ -162,5 +162,15 @@
+ 	void (*input_report_done)(const struct device *dev,
+ 				  const uint8_t *const report);
++
++	/**
++	 * Input transfer completion, including failures and cancellation.
++	 * Status is zero on success, or the USB controller's negative error.
++	 * This callback takes precedence over input_report_done() and selects
++	 * asynchronous submission. The report buffer may be reused afterward.
++	 * Like input_report_done(), this callback must not block.
++	 */
++	void (*input_report_complete)(const struct device *dev,
++				      const uint8_t *const report, int status);
+ 
+ 	/**
+ 	 * New output report callback. Callback will only be called for reports
+diff --git a/zephyr/subsys/usb/device_next/class/usbd_hid.c b/zephyr/subsys/usb/device_next/class/usbd_hid.c
+--- a/zephyr/subsys/usb/device_next/class/usbd_hid.c
++++ b/zephyr/subsys/usb/device_next/class/usbd_hid.c
+@@ -124,2 +124,4 @@
+-		if (ops->input_report_done != NULL) {
++		if (ops->input_report_complete != NULL) {
++			ops->input_report_complete(dev, buf->__buf, err);
++		} else if (ops->input_report_done != NULL) {
+ 			ops->input_report_done(dev, buf->__buf);
+@@ -592,2 +594,2 @@
+-	if (ops->input_report_done == NULL) {
++	if (ops->input_report_complete == NULL && ops->input_report_done == NULL) {
+ 		k_sem_take(&ddata->in_sem, K_FOREVER);

@@ -26,8 +26,8 @@ bootloader was checked against its stored CRC.
 Every release keeps a recovery copy of the application in external flash. The
 application records each boot and clears the count after an uninterrupted run
 of scanner replies. If USB is the selected or required output, its HID endpoint
-must also be ready. A charger or battery bank in Bluetooth mode leaves BLE
-selected and does not block the health check. On the first healthy boot after an
+must also be ready. A charger or battery bank in a wireless switch position
+does not require USB enumeration for the health check. On the first healthy boot after an
 update, the firmware copies the running image to the 452 KiB recovery slot in
 external NOR.
 
@@ -78,23 +78,31 @@ registers:
 
 - **`CONFIG_APEX_G4B_CHARGE_LIMIT`** (default on): caps charge voltage at **4.096 V**
   instead of the pack's 4.400 V rating, reducing the time the cell spends near
-  its highest voltage. This costs roughly a quarter of its rated runtime.
+  its highest voltage. Charge current is limited to **1,472 mA**, about **0.25C**
+  for the 5,870 mAh pack. The runtime reduction has not been measured.
 - **`CONFIG_APEX_G4B_CHARGE_STORAGE`** (default on): a charge hold band.
   The BQ25895's power path runs the keyboard from USB regardless (it runs with the
   battery physically removed), so when the pack reaches the stop point the
-  controller clears **REG03 `CHG_CONFIG`** — the cell is left idle, neither charged
-  nor discharged — and resumes only when it sags to the resume point. Defaults:
-  stop **80 %**, resume **72 %** (of the 4.4 V-referenced curve; the ~8-point gap
-  accounts for the resting-voltage settle after a charge). Charge state is
+  controller clears **REG03 `CHG_CONFIG`** to stop charging while USB powers the
+  keyboard, and resumes at the lower threshold. Defaults:
+  stop **80 %**, resume **72 %** on the stock firmware's voltage lookup table.
+  These are estimates, not measured percentages of remaining capacity. The gap
+  avoids restarting charge immediately as voltage settles. Charge state is
   checked during ZMK's existing battery update, without another thread. The host
   reports 100 % at the capped full because `APEX_G4B_BATT_FULL_MV` matches the
   cap.
+
+The pack is rated 3.85 V nominal, 5,870 mAh (22.5995 Wh), with a 4.4 V maximum
+charge voltage. The `80` charge preset selects the conservative 4.096 V ceiling;
+it does not guarantee exactly 80% state of charge. The board has no coulomb
+counter, and the stock voltage table has not been calibrated against measured
+capacity here. Lower-voltage charging does not guarantee freedom from swelling.
 
 ## Wireless power
 
 The wireless power controls have different USB conditions:
 
-- With Bluetooth selected and no VBUS, the scanner changes from its 1 ms active
+- In Bluetooth or dongle mode with no VBUS, the scanner changes from its 1 ms active
   period to 50 ms after five quiet seconds, then to 255 ms after one minute. The
   period field is one byte, so 255 ms is its maximum value. P0.24 ATTN wakes the
   Nordic on a key change and the scanner returns to 1 ms. Physical key wake has
@@ -106,7 +114,7 @@ The wireless power controls have different USB conditions:
   packed in a bag. The firmware suppresses the held keys, blanks RGB, and polls
   at 250 ms until the pressure is removed. The thresholds are listed in
   [Configuration](CONFIGURATION.md#useful-settings).
-- In Bluetooth mode without an active USB HID connection, RGB starts fading
+- In either wireless mode without an active USB HID connection, RGB starts fading
   after 30 seconds and then switches off both LED rails. SPIM2 and its pins are
   parked while the rails are off and restored before the controller is
   initialized on wake. A charge-only battery bank does not prevent this timeout.
