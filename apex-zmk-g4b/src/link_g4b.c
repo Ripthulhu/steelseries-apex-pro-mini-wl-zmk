@@ -2153,10 +2153,10 @@ static void s3_sleep_maybe(void)
         return;
     }
 
-    /* Bluetooth position only - the USB position parks P0.03 at mid-rail,
-     * where SENSE is not reliably either state.
-     */
-    if (g4b_mode_get() != G4B_MODE_BT) {
+    /* USB parks the mode pin at mid-rail, unsuitable for digital SENSE. */
+    if (g4b_mode_get() != G4B_MODE_BT &&
+        !(IS_ENABLED(CONFIG_APEX_G4B_DONGLE_SLEEP) &&
+          g4b_mode_get() == G4B_MODE_DONGLE)) {
         return;
     }
 

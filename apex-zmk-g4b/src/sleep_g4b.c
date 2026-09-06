@@ -11,9 +11,13 @@
 #include "pins_g4b.h"
 #include "rgb_g4b.h"
 #include "sleep_g4b.h"
+#if IS_ENABLED(CONFIG_APEX_G4B_DONGLE_SLEEP)
+#include "apex_radio_input.h"
+#endif
 
 /* PIN_CNF SENSE field, bits 17:16. 2 = High, 3 = Low, 0 = Disabled. */
 #define G4B_PINCNF_SENSE_HIGH (2u << 16)
+#define G4B_PINCNF_SENSE_LOW (3u << 16)
 
 #define G4B_SLEEP_MODE_PIN 3u /* P0.03, the mode switch divider (AIN1) */
 
@@ -63,6 +67,11 @@ uint32_t g4b_sleep_latch_raw(void)
 void g4b_sleep_enter(void)
 {
     uint32_t guard;
+    bool dongle = g4b_mode_get() == G4B_MODE_DONGLE;
+
+#if IS_ENABLED(CONFIG_APEX_G4B_DONGLE_SLEEP)
+    if (dongle && !apex_radio_pause()) return;
+#endif
 
     /* LEDs off first. The IS31 holds its PWM page with or without us, so a
      * frame left loaded would stay lit for the whole sleep and defeat the
@@ -75,9 +84,12 @@ void g4b_sleep_enter(void)
      * input buffer to a SAADC pin, and the watchdog feeder gates on that pin's
      * analog reading.
      */
+    unsigned int irq_key = irq_lock();
+    uint32_t saved_mode_cfg = NRF_P0->PIN_CNF[G4B_SLEEP_MODE_PIN];
     g4b_pin_cfg(G4B_PORT0, (enum g4b_pin)G4B_SLEEP_MODE_PIN,
                 G4B_PINCNF_DIR_INPUT | G4B_PINCNF_INBUF_CONN |
-                    G4B_PINCNF_PULL_NONE | G4B_PINCNF_SENSE_HIGH);
+                    G4B_PINCNF_PULL_NONE |
+                    (dongle ? G4B_PINCNF_SENSE_LOW : G4B_PINCNF_SENSE_HIGH));
 
     /* Clear the latch immediately before committing. DETECT is a level OR
      * across armed pins; if it is high when SYSTEMOFF is written the chip wakes
@@ -85,6 +97,14 @@ void g4b_sleep_enter(void)
      */
     NRF_P0->LATCH = 0xFFFFFFFFu;
     __DSB();
+
+    /* Recheck after stopping the radio and arming SENSE. A key or cable may
+     * have arrived while the caller was preparing to sleep. */
+    bool switch_high = (NRF_P0->IN & BIT(G4B_SLEEP_MODE_PIN)) != 0;
+    if (g4b_pin_read(G4B_PORT0, G4B_P0_ATTN) || switch_high != dongle ||
+        (NRF_POWER->USBREGSTATUS & POWER_USBREGSTATUS_VBUSDETECT_Msk)) {
+        goto resume;
+    }
 
     NRF_POWER->SYSTEMOFF = 1u;
     __DSB();
@@ -96,4 +116,10 @@ void g4b_sleep_enter(void)
     while (guard-- != 0u) {
         __NOP();
     }
+resume:
+    NRF_P0->PIN_CNF[G4B_SLEEP_MODE_PIN] = saved_mode_cfg;
+    irq_unlock(irq_key);
+#if IS_ENABLED(CONFIG_APEX_G4B_DONGLE_SLEEP)
+    if (dongle) apex_radio_resume();
+#endif
 }

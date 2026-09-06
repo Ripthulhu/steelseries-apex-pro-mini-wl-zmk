@@ -170,8 +170,14 @@ periods of 50 ms after five seconds and 255 ms after a minute, plus RGB shutdown
 after 30 seconds. A key wakes the scanner thread through ATTN. USB power disables
 scanner throttling; a charge-only source still permits the RGB timeout. The radio
 itself still runs the active test schedule, so this does not provide Bluetooth's
-radio power savings. Radio duty cycling and dongle-mode System OFF remain to be
-implemented and measured.
+radio power savings. Radio duty cycling remains to be implemented and measured.
+`CONFIG_APEX_G4B_DONGLE_SLEEP` enables experimental Nordic System OFF after
+`CONFIG_APEX_G4B_SLEEP_MS`. The radio-input configuration enables it with the
+normal 15-minute timeout. This stops the radio and wakes through a full reboot,
+not an ordinary idle scan. Key wake and switching to Bluetooth, then back to
+dongle mode, passed hardware tests with a shortened 60-second timeout. The full
+15-minute wait and current consumption have not yet been measured. The middle
+USB switch position is not a guaranteed wake source.
 
 The current schedule uses 20 ms channel slots and a 5 ms input retry interval
 inside guarded transmit windows. It is not the planned 1 kHz scheduler, and

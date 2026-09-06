@@ -532,6 +532,17 @@ config APEX_G4B_THREAD_DELAY_MS
 	  the scanner thread at preemptible priority 10. This value adds directly to
 	  boot time.
 
+config APEX_G4B_DONGLE_SLEEP
+	bool "Experimental System OFF in dongle mode"
+	default n
+	depends on APEX_G4B_RADIO_INPUT && APEX_G4B_SLEEP_MS > 0
+	help
+	  Stop the radio before the existing sleep timeout powers down the Nordic.
+	  Wake on scanner attention or by moving the switch to Bluetooth. The USB
+	  switch position is not a guaranteed wake level. Wake resets the board
+	  and establishes a fresh radio session. Leave disabled until key and switch
+	  wake have been tested on the target keyboard.
+
 config APEX_G4B_IDLE_AFTER_MS
 	int "Slow the scan loop after this many ms without key activity"
 	default 5000

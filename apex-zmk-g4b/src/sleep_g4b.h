@@ -8,14 +8,16 @@
 /* Optional System OFF implementation for the STM32-backed scanner. ZMK deep
  * sleep cannot configure this board's non-matrix wake sources. Entry requires:
  *
- * - Bluetooth mode, where P0.03 is at a valid digital-low level.
+ * - Bluetooth mode, or dongle mode with APEX_G4B_DONGLE_SLEEP enabled.
+ *   P0.03 is low for Bluetooth and high for dongle; wake senses the opposite.
  * - P0.24 attention low, so the sense condition is not already active.
  * - A real attention event observed in GPIO LATCH during the current boot.
  *
  * Enabled after a 15-minute idle timeout (APEX_G4B_SLEEP_MS). It composes with
  * the scanner idle throttle: short idle throttles but keeps Bluetooth connected,
  * and System OFF only takes over after the longer timeout. Waking is a full
- * reset with a Bluetooth reconnect (~4-5 s), which the long timeout keeps rare.
+ * reset and reconnect. Dongle entry first stops the radio owner thread; an
+ * aborted sleep attempt resumes it with a fresh session.
  */
 
 /* Arm SENSE High on ATTN (P0.24) and start watching LATCH.

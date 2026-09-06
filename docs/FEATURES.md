@@ -131,7 +131,14 @@ The wireless power controls have different USB conditions:
 The nRF uses its DC/DC converter. Bluetooth requests a 7.5–15 ms connection
 interval with peripheral latency 30; the host chooses the final values.
 
-nRF System OFF is disabled because wake requires a reset and Bluetooth took
-about 16 seconds to reconnect in testing. STM32 STOP1 is also disabled: mode 0
+nRF System OFF uses `CONFIG_APEX_G4B_SLEEP_MS` (15 minutes in the current build).
+Dongle mode additionally requires `CONFIG_APEX_G4B_DONGLE_SLEEP`, enabled by the
+radio-input configuration. Wake reboots the keyboard and reconnects; it is not
+instant and the initial tap may be lost. Key and switch wake in dongle mode passed
+tests with a 60-second timeout; the full 15-minute wait and sleep current have
+not been measured. From dongle sleep, move the switch fully to Bluetooth to wake
+without a key; the middle USB position is not a guaranteed wake level.
+
+STM32 STOP1 remains disabled: mode 0
 stops the scanner, and neither a key nor the reconstructed link wake sequence
 restored it.

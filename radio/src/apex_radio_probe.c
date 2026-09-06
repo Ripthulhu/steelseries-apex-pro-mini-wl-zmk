@@ -114,6 +114,7 @@ static atomic_t input_selected, resync, queue_overflows, input_acked;
 static atomic_t rx_sequence, input_delivered, duplicate_reports, usb_waits;
 static atomic_t completion_acks, completion_ack_max_us;
 static uint32_t pending_usb_sequence;
+static atomic_t pause_requested, paused;
 static atomic_t link_timeouts, requested_resets;
 enum { RESET_QUEUE = 1, RESET_SELECTION = 2, RESET_COMMAND = 4, RESET_START = 8 };
 static atomic_t reset_reason, reset_at, timeout_at;
@@ -166,6 +167,26 @@ void apex_radio_delivery_notify(void)
 #if EVENT_RX
     k_sem_give(&radio_event);
 #endif
+}
+
+bool apex_radio_pause(void)
+{
+    if (!atomic_get(&running) || atomic_get(&error)) return false;
+    atomic_set(&pause_requested, 1);
+    apex_radio_delivery_notify();
+    int64_t deadline = k_uptime_get() + 50;
+    do {
+        if (atomic_get(&paused)) return true;
+        k_sleep(K_MSEC(1));
+    } while (k_uptime_get() < deadline);
+    apex_radio_resume();
+    return false;
+}
+
+void apex_radio_resume(void)
+{
+    atomic_set(&pause_requested, 0);
+    apex_radio_delivery_notify();
 }
 
 static int input_ack(uint32_t sequence)
@@ -408,6 +429,24 @@ static void probe_thread(void *a, void *b, void *c)
     uint32_t ping = 0;
 #endif
     for (;;) {
+#if INPUT_ENABLED
+        if (atomic_get(&pause_requested)) {
+            rc = radio_stop();
+            if (rc) goto failed;
+#if HOP_ENABLED
+            atomic_set(&hop_live, 0);
+#endif
+            atomic_set(&paused, 1);
+            while (atomic_get(&pause_requested)) k_sleep(K_MSEC(1));
+            atomic_set(&paused, 0);
+            rc = new_session();
+            if (rc) goto failed;
+            last_valid = k_uptime_get();
+            next_send = 0;
+            last_loop = k_cycle_get_32();
+            mark_valid_counters();
+        }
+#endif
         uint32_t loop_start = k_cycle_get_32();
         uint32_t loop_us = k_cyc_to_us_floor32(loop_start - last_loop);
         last_loop = loop_start;
