@@ -32,6 +32,10 @@
 #endif
 #if IS_ENABLED(CONFIG_APEX_G4B_RGB)
 #include "rgb_g4b.h"
+
+#if IS_ENABLED(CONFIG_APEX_G4B_GAMEPAD)
+#include "gamepad_g4b.h"
+#endif
 #endif
 #if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW)
 #include <zmk/rgb_underglow.h>
@@ -94,9 +98,11 @@ static bool parse_mm_tenths(const char *s, uint8_t *out)
  * charge current only (N/A on battery), so average draw is estimated from the
  * pack's state-of-charge slope over a long idle window: arm the sampler, unplug
  * USB, leave the keyboard idle on battery for hours, then replug and read it
- * back. The shipped image runs with System OFF disabled (APEX_G4B_SLEEP_MS=0),
- * so uptime is continuous on battery and this RAM ring survives the whole run;
- * a reboot clears it (which reads as "no run"). */
+ * back. This RAM ring survives only while uptime is continuous: any reset clears
+ * it (which reads as "no run"), including the System OFF wake once the board has
+ * been idle past APEX_G4B_SLEEP_MS. A drain run therefore captures the window up
+ * to the first sleep; for a measurement spanning deep sleep, compare the BQ25895
+ * state-of-charge before and after instead, since that survives the reset. */
 #define G4B_DRAIN_PACK_MAH       5870u  /* Fuji 4867A0, see twi_g4b.c */
 #define G4B_DRAIN_MAX_SAMPLES    120u
 #define G4B_DRAIN_MIN_INTERVAL_S 30u
@@ -386,6 +392,52 @@ static int cmd_rgbread(const struct shell *sh, size_t argc, char **argv)
     rgbread_report(sh, "open ", rb.open);
     rgbread_report(sh, "short", rb.shorted);
     shell_print(sh, "(a set bit = fault; a fully working LED shows none)");
+    return 0;
+}
+#endif
+
+#if IS_ENABLED(CONFIG_ZMK_USB)
+/* Studio's USB RPC (cdc_acm_0) is off by default so the gamepad's endpoint is
+ * free; toggle it on when the USB configurator is needed. Studio over Bluetooth
+ * is a separate transport and is always available. Also bound to Fn+RCtrl+S. */
+extern void zmk_usb_request_studio(bool on); /* app/src/usb.c */
+
+static int cmd_studio(const struct shell *sh, size_t argc, char **argv)
+{
+    if (argc >= 2 && !strcmp(argv[1], "on")) {
+        zmk_usb_request_studio(true);
+        shell_print(sh, "Studio USB RPC ON (re-enumerates; drops the gamepad). "
+                    "Studio over Bluetooth is unaffected.");
+    } else if (argc >= 2 && !strcmp(argv[1], "off")) {
+        zmk_usb_request_studio(false);
+        shell_print(sh, "Studio USB RPC OFF (re-enumerates).");
+    } else {
+        shell_print(sh, "Usage: apex studio [on|off]  (Fn+RCtrl+S toggles it too)");
+        shell_print(sh, "Off by default so the gamepad's USB endpoint is free; "
+                    "only one of the two fits at a time.");
+    }
+    return 0;
+}
+#endif
+
+#if IS_ENABLED(CONFIG_APEX_G4B_GAMEPAD)
+static int cmd_gamepad(const struct shell *sh, size_t argc, char **argv)
+{
+    if (argc >= 2 && !strcmp(argv[1], "on")) {
+        g4b_gamepad_set_enabled(true);
+        g4b_settings_mark_dirty();
+        shell_print(sh, "gamepad ON (persisted). Adds a USB HID game controller "
+                    "and re-enumerates - USB only. Check joy.cpl.");
+    } else if (argc >= 2 && !strcmp(argv[1], "off")) {
+        g4b_gamepad_set_enabled(false);
+        g4b_settings_mark_dirty();
+        shell_print(sh, "gamepad OFF (persisted).");
+    } else {
+        shell_print(sh, "gamepad: %s", g4b_gamepad_is_enabled() ? "ON" : "off");
+        shell_print(sh, "  reports sent=%u busy=%u err=%u",
+                    g4b_gp_writes, g4b_gp_busy, g4b_gp_err);
+        shell_print(sh, "USB-only (not exposed over Bluetooth). Fn+Z also toggles it.");
+    }
     return 0;
 }
 #endif
@@ -1177,6 +1229,23 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
               "Usage: apex rt [on <mm> | off]   e.g. apex rt on 0.3\n"
               "No args prints current state.",
               cmd_rt),
+#if IS_ENABLED(CONFIG_ZMK_USB)
+    SHELL_CMD(studio, NULL,
+              "Studio USB RPC interface (off by default).\n"
+              "Usage: apex studio [on|off]   (Fn+RCtrl+S toggles it too)\n"
+              "On adds the Studio RPC serial and re-enumerates, dropping the "
+              "gamepad (only one optional USB interface fits). BLE Studio is "
+              "always available.",
+              cmd_studio),
+#endif
+#if IS_ENABLED(CONFIG_APEX_G4B_GAMEPAD)
+    SHELL_CMD(gamepad, NULL,
+              "USB analog gamepad (W/A/S/D depth as joystick axes).\n"
+              "Usage: apex gamepad [on|off]   (Fn+Z toggles it too)\n"
+              "USB-only; adds a HID game controller and re-enumerates. No args "
+              "shows state and report counters.",
+              cmd_gamepad),
+#endif
     SHELL_CMD(rgb, NULL,
               "RGB effects + brightness + tuning.\n"
               "Usage: apex rgb [<index 0..11> | bright up|down | gain [0..255] |\n"

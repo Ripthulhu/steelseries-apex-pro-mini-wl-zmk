@@ -15,6 +15,15 @@
 
 #include "actuation_g4b.h"
 #include "rgb_fx_g4b.h"
+#if IS_ENABLED(CONFIG_APEX_G4B_FN_OVERLAY)
+#include "rgb_overlay_g4b.h"
+#else
+static inline void g4b_rgb_overlay_flash(uint8_t hid, bool on)
+{
+    ARG_UNUSED(hid);
+    ARG_UNUSED(on);
+}
+#endif
 #if IS_ENABLED(CONFIG_APEX_G4B_SW_RECOVERY)
 #include "recovery_g4b.h"
 #endif
@@ -55,6 +64,7 @@ static int on_pressed(struct zmk_behavior_binding *binding,
         break;
     case G4B_ACT_RT_TOGGLE:
         g4b_rapid_trigger_toggle();
+        g4b_rgb_overlay_flash(0x17u /* T */, g4b_rapid_trigger_tenths() > 0u);
         break;
     case G4B_ACT_RESET:
         g4b_reset_point_cycle();

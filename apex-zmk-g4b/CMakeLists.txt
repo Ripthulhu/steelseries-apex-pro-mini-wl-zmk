@@ -23,6 +23,7 @@ zephyr_library_sources_ifdef(CONFIG_APEX_G4B_RGB src/rgb_g4b.c)
 zephyr_library_sources_ifdef(CONFIG_APEX_G4B_RGB src/led_strip_g4b.c)
 zephyr_library_sources_ifdef(CONFIG_APEX_G4B_RGB src/rgb_fx_g4b.c)
 zephyr_library_sources_ifdef(CONFIG_APEX_G4B_RGB src/rgb_map_g4b.c)
+zephyr_library_sources_ifdef(CONFIG_APEX_G4B_FN_OVERLAY src/rgb_overlay_g4b.c)
 zephyr_library_sources_ifdef(CONFIG_APEX_G4B_UART_EVIDENCE src/evidence_g4b.c)
 # apex_control: shared control/telemetry API. Currently only the debug shell
 # uses it; the Studio apex RPC subsystem will add its own condition later.
@@ -43,6 +44,7 @@ zephyr_library_sources_ifdef(CONFIG_APEX_G4B_DFU_TRIGGER src/dfu_trigger_g4b.c)
 # shared by all seven stage images, so a behavior it references has to exist in
 # all of them; when CONFIG_APEX_G4B_GAMEPAD is off the file resolves to stubs.
 zephyr_library_sources_ifdef(CONFIG_APEX_G4B_SPIM_KSCAN src/behavior_analog_g4b.c)
+zephyr_library_sources_ifdef(CONFIG_APEX_G4B_SPIM_KSCAN src/behavior_studio_g4b.c)
 zephyr_library_sources_ifdef(CONFIG_APEX_G4B_SPIM_KSCAN src/behavior_actuation_g4b.c)
 zephyr_library_sources_ifdef(CONFIG_APEX_G4B_SPIM_KSCAN src/behavior_dfu_g4b.c)
 zephyr_library_sources_ifdef(CONFIG_APEX_G4B_SW_RECOVERY src/recovery_g4b.c)

@@ -58,7 +58,7 @@ index 8c0675e..8f26814 100644
  config ZMK_USB_INIT_PRIORITY
      int "USB Init Priority"
 diff --git a/app/src/usb.c b/app/src/usb.c
-index cf76341..322376a 100644
+index cf76341..95881c2 100644
 --- a/app/src/usb.c
 +++ b/app/src/usb.c
 @@ -2,13 +2,22 @@
@@ -161,7 +161,7 @@ index cf76341..322376a 100644
  #if IS_ENABLED(CONFIG_ZMK_USB_BOOT)
      if (status == USB_DC_RESET) {
          zmk_usb_hid_set_protocol(HID_PROTOCOL_REPORT);
-@@ -73,19 +129,179 @@ void usb_status_cb(enum usb_dc_status_code status, const uint8_t *params) {
+@@ -73,19 +129,218 @@ void usb_status_cb(enum usb_dc_status_code status, const uint8_t *params) {
          is_configured = false;
      }
      k_work_submit(&usb_status_notifier_work);
@@ -234,23 +234,44 @@ index cf76341..322376a 100644
 + * build has no gamepad the name simply matches nothing and blocklisting is a
 + * no-op. Registering all-classes-minus-blocklist each time keeps us off the
 + * per-class register path, which the stack forbids mixing with register_all. */
-+static const char *const zmk_usb_gamepad_blocklist[] = { "hid_1", NULL };
-+static bool zmk_usb_gamepad_present; /* is hid_1 currently in the config? */
-+static bool zmk_usb_gamepad_target;  /* desired state, set by the toggle */
++/* Two optional interfaces share the nRF52833's seven IN endpoints: the analog
++ * gamepad HID ("hid_1") and Studio's RPC CDC ("cdc_acm_0"). With the keyboard
++ * HID and the shell + DFU CDCs always present, only one of the two optional
++ * interfaces fits at a time, so enabling one drops the other (mutual exclusion
++ * below). Both default OFF; Studio over USB is turned on with Fn+RCtrl+S, the
++ * gamepad with Fn+Z. Studio over Bluetooth is a separate transport and is
++ * unaffected. */
++static bool zmk_usb_gamepad_present, zmk_usb_gamepad_target;
++static bool zmk_usb_studio_present, zmk_usb_studio_target;
 +static bool zmk_usb_started;         /* zmk_usb_init finished; gates the reconfig */
-+
-+static int zmk_usb_apply_classes(bool gamepad_on) {
+ 
+-    usb_enable_ret = usb_enable(usb_status_cb);
++/* Register every class except the optional interfaces that are currently off. */
++static int zmk_usb_apply_classes(void) {
++    const char *blocklist[3];
++    size_t n = 0;
+ 
+-    if (usb_enable_ret != 0) {
+-        LOG_ERR("Unable to enable USB");
+-        return -EINVAL;
++    if (!zmk_usb_gamepad_target) {
++        blocklist[n++] = "hid_1";
++    }
++    if (!zmk_usb_studio_target) {
++        blocklist[n++] = "cdc_acm_0";
+     }
++    blocklist[n] = NULL;
 +    return usbd_register_all_classes(&zmk_usbd, USBD_SPEED_FS, 1,
-+                                     gamepad_on ? NULL : zmk_usb_gamepad_blocklist);
++                                     n ? blocklist : NULL);
 +}
 +
 +/* Register the requested class set and bring the stack back up. The caller must
 + * have already disabled + shut the stack down so usbd_init can run again. */
-+static int zmk_usb_bringup(bool gamepad_on) {
++static int zmk_usb_bringup(void) {
 +    int err;
 +
 +    (void)usbd_unregister_all_classes(&zmk_usbd, USBD_SPEED_FS, 1);
-+    err = zmk_usb_apply_classes(gamepad_on);
++    err = zmk_usb_apply_classes();
 +    if (err) {
 +        return err;
 +    }
@@ -261,51 +282,68 @@ index cf76341..322376a 100644
 +    return zmk_usb_enable_if_powered(&zmk_usbd);
 +}
 +
-+static void zmk_usb_gamepad_reconfig(struct k_work *work) {
-+    bool on = zmk_usb_gamepad_target;
-+
++static void zmk_usb_class_reconfig(struct k_work *work) {
 +    ARG_UNUSED(work);
 +    /* Don't touch the stack until zmk_usb_init has brought it fully up. A request
 +     * that lands during boot (e.g. the persisted-state restore in link_g4b.c) is
-+     * just remembered in zmk_usb_gamepad_target and applied by zmk_usb_init itself
-+     * - no teardown of a half-initialized context, and no double enumeration. */
++     * just remembered in the target and applied by zmk_usb_init itself - no
++     * teardown of a half-initialized context, and no double enumeration. */
 +    if (!zmk_usb_started) {
 +        return;
 +    }
-+    if (on == zmk_usb_gamepad_present) {
++    if (zmk_usb_gamepad_target == zmk_usb_gamepad_present &&
++        zmk_usb_studio_target == zmk_usb_studio_present) {
 +        return; /* already in the requested state */
 +    }
 +
 +    (void)usbd_disable(&zmk_usbd);
 +    (void)usbd_shutdown(&zmk_usbd);
-
--    usb_enable_ret = usb_enable(usb_status_cb);
-+    if (zmk_usb_bringup(on) == 0) {
-+        zmk_usb_gamepad_present = on;
++
++    if (zmk_usb_bringup() == 0) {
++        zmk_usb_gamepad_present = zmk_usb_gamepad_target;
++        zmk_usb_studio_present = zmk_usb_studio_target;
 +        return;
 +    }
-
--    if (usb_enable_ret != 0) {
--        LOG_ERR("Unable to enable USB");
--        return -EINVAL;
-+    /* Restore the previous class set if the requested one fails. This keeps the
-+     * keyboard, updater, and serial interfaces available when gamepad setup
-+     * cannot complete. */
-+    LOG_ERR("gamepad reconfig failed; restoring previous class set");
++
++    /* Restore the previous class set if the requested one fails (e.g. no free
++     * endpoint). This keeps the keyboard, updater, and serial interfaces
++     * available when the optional interface cannot be added. */
++    LOG_ERR("usb class reconfig failed; restoring previous class set");
++    zmk_usb_gamepad_target = zmk_usb_gamepad_present;
++    zmk_usb_studio_target = zmk_usb_studio_present;
 +    (void)usbd_disable(&zmk_usbd);
 +    (void)usbd_shutdown(&zmk_usbd);
-+    if (zmk_usb_bringup(zmk_usb_gamepad_present) != 0) {
-+        LOG_ERR("gamepad reconfig fallback failed; USB is down");
-     }
++    if (zmk_usb_bringup() != 0) {
++        LOG_ERR("usb class reconfig fallback failed; USB is down");
++    }
 +}
-+static K_WORK_DEFINE(zmk_usb_gamepad_work, zmk_usb_gamepad_reconfig);
++static K_WORK_DEFINE(zmk_usb_class_work, zmk_usb_class_reconfig);
 +
 +/* Called from the gamepad toggle (src/gamepad_g4b.c, via Fn+Z). Requests the
 + * gamepad interface be present (on=true) or absent (on=false); the actual USB
-+ * teardown/rebuild runs on the work item. Coalesces rapid toggles to the last. */
++ * teardown/rebuild runs on the work item. Enabling the gamepad drops Studio's
++ * USB RPC, since only one optional interface fits. */
 +void zmk_usb_request_gamepad(bool on) {
 +    zmk_usb_gamepad_target = on;
-+    k_work_submit(&zmk_usb_gamepad_work);
++    if (on) {
++        zmk_usb_studio_target = false;
++    }
++    k_work_submit(&zmk_usb_class_work);
++}
++
++/* Called from the Studio-USB toggle (Fn+RCtrl+S). Requests Studio's RPC CDC be
++ * present or absent; enabling it drops the gamepad for the same reason. */
++void zmk_usb_request_studio(bool on) {
++    zmk_usb_studio_target = on;
++    if (on) {
++        zmk_usb_gamepad_target = false;
++    }
++    k_work_submit(&zmk_usb_class_work);
++}
++
++/* Current desired state of the Studio USB RPC interface, for the toggle. */
++bool zmk_usb_studio_is_on(void) {
++    return zmk_usb_studio_target;
 +}
 +
 +/* ------------------------------------------------------------------ init -- */
@@ -320,13 +358,14 @@ index cf76341..322376a 100644
 +    err = usbd_add_configuration(&zmk_usbd, USBD_SPEED_FS, &zmk_usbd_fs_config);
 +    if (err) goto fail;
 +
-+    /* Register the requested gamepad state. It is normally off at boot (Fn+Z
-+     * default off) so hid_1 is absent; but if the persisted-state restore already
-+     * ran and asked for the gamepad on, apply that here rather than enumerate
-+     * without it and immediately re-enumerate from the reconfig work. */
-+    err = zmk_usb_apply_classes(zmk_usb_gamepad_target);
++    /* Register the requested optional-interface state. Both the gamepad (hid_1)
++     * and Studio's USB RPC (cdc_acm_0) are off at boot, so neither is present;
++     * but if a persisted-state restore already asked for one, apply it here
++     * rather than enumerate without it and immediately re-enumerate. */
++    err = zmk_usb_apply_classes();
 +    if (err) goto fail;
 +    zmk_usb_gamepad_present = zmk_usb_gamepad_target;
++    zmk_usb_studio_present = zmk_usb_studio_target;
 +
 +    usbd_self_powered(&zmk_usbd, zmk_usbd_attrs & USB_SCD_SELF_POWERED);
 +

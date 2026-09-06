@@ -105,7 +105,7 @@ def verify_release_config(artifact_dir: Path) -> None:
         "APEX_G4B_KBD_CAPTURE": "n",
         "APEX_G4B_KBD_TELEMETRY": "n",
         "APEX_G4B_LITTLEFS": "n",
-        "APEX_G4B_SLEEP_MS": "0",
+        "APEX_G4B_SLEEP_MS": "900000",
         "APEX_G4B_STM32_STOP1_IDLE_MS": "0",
         "APEX_G4B_STM32_STOP1_ALLOW_USB": "n",
         "APEX_G4B_UART_EMIT": "n",
@@ -172,6 +172,7 @@ def verify_release_config(artifact_dir: Path) -> None:
         "APEX_G4B_SPINOR",
         "APEX_G4B_SHELL",
         "APEX_G4B_USB_DATA_VBUS_GATE",
+        "APEX_G4B_FN_OVERLAY",
     }
     unexpected = sorted(
         name for name, value in config.items()

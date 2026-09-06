@@ -385,6 +385,22 @@ config APEX_G4B_RGB_READBACK
 	  reconfigures SPIM2 and flashes the array dim while detecting, so it is
 	  off by default. See docs/reverse-engineering/RGB_CONTROLLER.md.
 
+config APEX_G4B_FN_OVERLAY
+	bool "Light the Fn-layer keys as a legend and flash mode toggles"
+	default y
+	depends on APEX_G4B_RGB && ZMK_RGB_UNDERGLOW && APEX_G4B_SPIM_KSCAN
+	help
+	  While the Fn layer is held, replace the array with a per-key legend: the
+	  mode toggles (gamepad, Studio over USB, rapid trigger, RGB on/off) show
+	  green when on and red when off, and the other Fn functions light by
+	  category (RGB adjust, actuation, media, Bluetooth, navigation, F-keys).
+
+	  Toggling a mode also flashes that key green twice when it turns on or red
+	  twice when it turns off, even when Fn is not held.
+
+	  The legend is composited into the transmit frame only, so the running
+	  effect is untouched and repaints the moment Fn is released.
+
 config APEX_G4B_RGB_IDLE_MS
 	int "Begin fading RGB after this many ms of key idle in Bluetooth mode"
 	default 30000
@@ -555,12 +571,17 @@ config APEX_G4B_STM32_IDLE_SCAN_PERIOD_MS
 	depends on ZMK_BLE && ZMK_USB
 	depends on !APEX_G4B_KBD_CAPTURE
 	depends on APEX_G4B_IDLE_AFTER_MS > 0 && APEX_G4B_STM32_RESET_MS > 0
-	depends on APEX_G4B_SLEEP_MS = 0
 	depends on APEX_G4B_STM32_STOP1_IDLE_MS = 0
 	help
 	  Send SET_MODE 20 03 <period-ms> after APEX_G4B_IDLE_AFTER_MS while on
 	  battery in the Bluetooth switch position. The STM32 keeps detecting keys
 	  and raising ATTN, but runs its matrix/ADC pass at the alternate period.
+
+	  Composes with APEX_G4B_SLEEP_MS: the scanner is throttled through these
+	  idle tiers first (Bluetooth stays connected, instant wake), and System OFF
+	  then takes over after the longer APEX_G4B_SLEEP_MS timeout. The main loop's
+	  ATTN-low branch runs the throttle and the sleep check off the same activity
+	  clock, in that order, so the two tiers do not fight.
 
 	  The first key is detected at the slow cadence. The scanner's installed
 	  mode-1 change callback then clears the alternate selector itself, returning

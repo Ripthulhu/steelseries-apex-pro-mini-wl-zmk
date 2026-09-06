@@ -27,6 +27,9 @@
 
 #include "pins_g4b.h"
 #include "rgb_g4b.h"
+#if IS_ENABLED(CONFIG_APEX_G4B_FN_OVERLAY)
+#include "rgb_overlay_g4b.h"
+#endif
 
 #define G4B_RGB_END_US   20000u
 
@@ -416,31 +419,49 @@ void g4b_rgb_set_all(uint8_t r, uint8_t g, uint8_t b)
 
 void g4b_rgb_show(void)
 {
-    /* Full brightness is the common case and needs no copy: send the staged
-     * frame straight out. Otherwise scale every channel by the fade and send
-     * the scaled copy, leaving the staged frame untouched.
+#if IS_ENABLED(CONFIG_APEX_G4B_FN_OVERLAY)
+    uint32_t now = k_uptime_get_32();
+    bool overlay = g4b_rgb_overlay_wants(now);
+#else
+    const bool overlay = false;
+#endif
+
+    /* Full brightness with no overlay is the common case and needs no copy:
+     * send the staged frame straight out. Otherwise scale every channel by the
+     * fade (or copy it), composite the overlay onto the copy, and send that -
+     * always leaving the staged frame untouched so the base effect survives.
      */
-    if (rgb_fade >= 256u) {
+    if (rgb_fade >= 256u && !overlay) {
         spim2_write(rgb_pwm_frame, sizeof(rgb_pwm_frame));
         return;
     }
 
     rgb_out_frame[0] = rgb_pwm_frame[0];
     rgb_out_frame[1] = rgb_pwm_frame[1];
-    for (uint32_t i = 0u; i < G4B_RGB_CHANNELS; i++) {
-        /* channel*fade is in 1/256 units; emit the whole part plus a dithered
-         * carry so the low byte is not just thrown away. */
-        uint32_t prod = (uint32_t)rgb_pwm_frame[2u + i] * rgb_fade;
-        uint32_t whole = prod >> 8;
-        uint32_t acc = (uint32_t)rgb_fade_resid[i] + (prod & 0xFFu);
+    if (rgb_fade >= 256u) {
+        memcpy(&rgb_out_frame[2], &rgb_pwm_frame[2], G4B_RGB_CHANNELS);
+    } else {
+        for (uint32_t i = 0u; i < G4B_RGB_CHANNELS; i++) {
+            /* channel*fade is in 1/256 units; emit the whole part plus a
+             * dithered carry so the low byte is not just thrown away. */
+            uint32_t prod = (uint32_t)rgb_pwm_frame[2u + i] * rgb_fade;
+            uint32_t whole = prod >> 8;
+            uint32_t acc = (uint32_t)rgb_fade_resid[i] + (prod & 0xFFu);
 
-        if (acc >= 256u) {
-            acc -= 256u;
-            whole++;
+            if (acc >= 256u) {
+                acc -= 256u;
+                whole++;
+            }
+            rgb_fade_resid[i] = (uint8_t)acc;
+            rgb_out_frame[2u + i] = (uint8_t)(whole > 255u ? 255u : whole);
         }
-        rgb_fade_resid[i] = (uint8_t)acc;
-        rgb_out_frame[2u + i] = (uint8_t)(whole > 255u ? 255u : whole);
     }
+
+#if IS_ENABLED(CONFIG_APEX_G4B_FN_OVERLAY)
+    if (overlay) {
+        g4b_rgb_overlay_apply(rgb_out_frame, now);
+    }
+#endif
     spim2_write(rgb_out_frame, sizeof(rgb_out_frame));
 }
 

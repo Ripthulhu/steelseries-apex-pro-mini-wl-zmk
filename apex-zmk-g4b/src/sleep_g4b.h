@@ -12,8 +12,10 @@
  * - P0.24 attention low, so the sense condition is not already active.
  * - A real attention event observed in GPIO LATCH during the current boot.
  *
- * System OFF remains disabled in the supported configuration because wake
- * requires a reset and Bluetooth reconnection.
+ * Enabled after a 15-minute idle timeout (APEX_G4B_SLEEP_MS). It composes with
+ * the scanner idle throttle: short idle throttles but keeps Bluetooth connected,
+ * and System OFF only takes over after the longer timeout. Waking is a full
+ * reset with a Bluetooth reconnect (~4-5 s), which the long timeout keeps rare.
  */
 
 /* Arm SENSE High on ATTN (P0.24) and start watching LATCH.

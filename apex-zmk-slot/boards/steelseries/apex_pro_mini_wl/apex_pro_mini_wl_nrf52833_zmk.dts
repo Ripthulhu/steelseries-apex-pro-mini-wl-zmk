@@ -154,6 +154,14 @@ zephyr_udc0: &usbd {
             display-name = "Game Mode";
         };
 
+        /* Toggles Studio's USB RPC interface (off at boot so the gamepad's USB
+         * endpoint is free). Bound to Fn+RCtrl+S in the keymap. */
+        studio_tog: behavior_studio_toggle {
+            compatible = "apex,behavior-studio-toggle";
+            #binding-cells = <0>;
+            display-name = "Studio over USB";
+        };
+
         /* Actuation point, reset point and rapid trigger, from the keymap.
          *
          * One behavior with a parameter rather than five compatibles - they are

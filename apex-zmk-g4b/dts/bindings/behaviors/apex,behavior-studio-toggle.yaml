@@ -1,0 +1,14 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: MIT
+
+description: |
+  Toggles Studio's USB RPC interface on and off from the keymap.
+
+  It is off at boot so its USB endpoint is free for the optional gamepad; the
+  two share the last free endpoint and only one fits at a time, so enabling
+  Studio over USB drops the gamepad. Studio over Bluetooth is a separate
+  transport and is always available.
+
+compatible: "apex,behavior-studio-toggle"
+
+include: zero_param.yaml

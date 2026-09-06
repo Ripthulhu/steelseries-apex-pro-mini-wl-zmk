@@ -33,6 +33,9 @@
 #if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW)
 #include "rgb_g4b.h"
 #include "rgb_fx_g4b.h"
+#if IS_ENABLED(CONFIG_APEX_G4B_FN_OVERLAY)
+#include "rgb_overlay_g4b.h"
+#endif
 #include "rgb_map_g4b.h"
 #endif
 #if IS_ENABLED(CONFIG_APEX_G4B_GAMEPAD)
@@ -3558,6 +3561,14 @@ static void s3_run_keyboard(void)
          * idle blanker and the rail cycling still gate the output.
          */
         (void)g4b_fx_tick();
+#if IS_ENABLED(CONFIG_APEX_G4B_FN_OVERLAY)
+        /* Keep flushing while the Fn legend or a toggle flash is live, so the
+         * overlay animates and clears one flush after it deactivates. The
+         * overlay itself is composited in g4b_rgb_show(). */
+        if (g4b_rgb_overlay_tick(k_uptime_get_32())) {
+            g4b_rgb_mark_pending();
+        }
+#endif
         g4b_rgb_flush();
 #endif
 

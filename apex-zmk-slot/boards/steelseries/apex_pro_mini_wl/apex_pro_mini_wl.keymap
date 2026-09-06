@@ -34,6 +34,17 @@
             layers = <1>;
             bindings = <&studio_unlock>;
         };
+
+        /* Toggle Studio's USB RPC on/off: hold Fn (layer 1) and press S +
+         * Right-Ctrl together. Positions: S = 30, Right-Ctrl = 60. Off at boot
+         * so the gamepad's USB endpoint is free; turning it on drops the
+         * gamepad. Studio over Bluetooth is always available regardless. */
+        combo_studio_usb {
+            timeout-ms = <250>;
+            key-positions = <30 60>;
+            layers = <1>;
+            bindings = <&studio_tog>;
+        };
     };
 
     keymap {
