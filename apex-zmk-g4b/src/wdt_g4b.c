@@ -100,13 +100,10 @@ static bool wdt_feed_once(uint32_t up)
 
 #if IS_ENABLED(CONFIG_APEX_G4B_WATCHDOG)
 	/* Give startup and scanner configuration time to finish. Once the keyboard
-	 * loop begins, require it to keep moving. A build with the experimental
-	 * dongle transport has a different loop in that switch position. */
-	if ((!IS_ENABLED(CONFIG_APEX_G4B_DONGLE_RADIO) ||
-	     g4b_mode_get() != G4B_MODE_DONGLE) &&
-	    ((!keyboard_heartbeat_started && up >= G4B_WDT_KEYBOARD_GRACE_MS) ||
+	 * loop begins, require it to keep moving in every transport mode. */
+	if ((!keyboard_heartbeat_started && up >= G4B_WDT_KEYBOARD_GRACE_MS) ||
 	     (keyboard_heartbeat_started &&
-	      (up - keyboard_heartbeat_ms) >= G4B_WDT_KEYBOARD_GRACE_MS))) {
+	      (up - keyboard_heartbeat_ms) >= G4B_WDT_KEYBOARD_GRACE_MS)) {
 		g4b_wdt.stopped_reason = G4B_WDT_STOP_KEYBOARD;
 		wdt_stopped_for_good = true;
 		return false;

@@ -1,0 +1,44 @@
+/* SPDX-License-Identifier: MIT */
+/dts-v1/;
+#include <nordic/nrf52833_qiaa.dtsi>
+
+/ {
+    model = "Apex Pro Mini Wireless receiver";
+    compatible = "steelseries,apex-receiver";
+    receiver_hid: receiver_hid {
+        compatible = "zephyr,hid-device";
+        protocol-code = "keyboard";
+        in-report-size = <16>;
+        in-polling-period-us = <1000>;
+    };
+    chosen {
+        zephyr,sram = &sram0;
+        zephyr,flash = &flash0;
+        zephyr,code-partition = &app_partition;
+        zephyr,shell-uart = &shell_uart;
+    };
+};
+
+zephyr_udc0: &usbd {
+    status = "okay";
+    shell_uart: shell_uart {
+        compatible = "zephyr,cdc-acm-uart";
+        label = "Receiver console";
+    };
+};
+
+&wdt0 { status = "okay"; };
+
+&flash0 {
+    partitions {
+        compatible = "fixed-partitions";
+        #address-cells = <1>;
+        #size-cells = <1>;
+        mbr_partition: partition@0 { label = "mbr"; reg = <0 0x1000>; read-only; };
+        app_partition: partition@1000 { label = "application"; reg = <0x1000 0x6c000>; };
+        storage_partition: partition@6d000 { label = "storage"; reg = <0x6d000 0x7000>; };
+        boot_partition: partition@74000 { label = "bootloader"; reg = <0x74000 0xa000>; read-only; };
+        mbr_params: partition@7e000 { label = "mbr-params"; reg = <0x7e000 0x1000>; read-only; };
+        boot_settings: partition@7f000 { label = "boot-settings"; reg = <0x7f000 0x1000>; read-only; };
+    };
+};

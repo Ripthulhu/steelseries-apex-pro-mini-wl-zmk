@@ -1,0 +1,6 @@
+board:
+  name: apex_receiver
+  full_name: Apex Pro Mini Wireless receiver
+  vendor: steelseries
+  socs:
+    - name: nrf52833

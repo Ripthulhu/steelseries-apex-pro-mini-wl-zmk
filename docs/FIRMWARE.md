@@ -128,13 +128,14 @@ The application also provides:
 
 ## The radio
 
-`radio_g4b.c` can stand the BLE controller down when the mode switch selects
-dongle, and `radio_esb_g4b.c` contains the unfinished vendor-link experiment.
-They are gated by `CONFIG_APEX_G4B_DONGLE_RADIO` and
-`CONFIG_APEX_G4B_ESB`; both are disabled and omitted from release firmware.
-Diagnostic builds can enable them for radio work. Pairing is not complete, and
-the current transmit sweep is not suitable for normal battery use. The recovered
-protocol and PHY details are in
+`radio_g4b.c` releases the Bluetooth controller when the mode switch selects
+dongle. It is disabled in release firmware and does not provide a radio link
+by itself. The old stock-protocol transmitter and raw scanner-report queue have
+been removed. The [custom transport](../dongle/README.md#keyboard-input-development)
+sends ZMK's processed keyboard and media reports in development builds. It is
+not enabled in release firmware; gamepad, Studio and wireless updates remain
+unfinished.
+The recovered protocol and PHY details are in
 [reverse-engineering/RADIO.md](reverse-engineering/RADIO.md).
 
 ## Build checks

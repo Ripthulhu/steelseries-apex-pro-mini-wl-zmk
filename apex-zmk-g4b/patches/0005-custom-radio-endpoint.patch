@@ -1,0 +1,144 @@
+diff --git a/app/src/endpoints.c b/app/src/endpoints.c
+index 17cdc5d..76ea4f7 100644
+--- a/app/src/endpoints.c
++++ b/app/src/endpoints.c
+@@ -20,6 +20,10 @@
+ #include <zmk/events/ble_active_profile_changed.h>
+ #include <zmk/events/usb_conn_state_changed.h>
+ #include <zmk/events/endpoint_changed.h>
++#if IS_ENABLED(CONFIG_APEX_G4B_RADIO_INPUT)
++#include <apex_radio_input.h>
++extern bool g4b_mode_boot_dongle(void);
++#endif
+ 
+ #include <zephyr/logging/log.h>
+ 
+@@ -78,6 +82,7 @@ bool zmk_endpoint_instance_eq(struct zmk_endpoint_instance a, struct zmk_endpoin
+     switch (a.transport) {
+     case ZMK_TRANSPORT_NONE:
+     case ZMK_TRANSPORT_USB:
++    case ZMK_TRANSPORT_RADIO:
+         return true;
+ 
+     case ZMK_TRANSPORT_BLE:
+@@ -95,6 +100,8 @@ int zmk_endpoint_instance_to_str(struct zmk_endpoint_instance endpoint, char *st
+ 
+     case ZMK_TRANSPORT_USB:
+         return snprintf(str, len, "USB");
++    case ZMK_TRANSPORT_RADIO:
++        return snprintf(str, len, "Radio");
+ 
+     case ZMK_TRANSPORT_BLE:
+         return snprintf(str, len, "BLE:%d", endpoint.ble.profile_index);
+@@ -118,6 +125,8 @@ int zmk_endpoint_instance_to_index(struct zmk_endpoint_instance endpoint) {
+ 
+     case ZMK_TRANSPORT_BLE:
+         return INSTANCE_INDEX_OFFSET_BLE + endpoint.ble.profile_index;
++    case ZMK_TRANSPORT_RADIO:
++        return INSTANCE_INDEX_OFFSET_BLE + ZMK_ENDPOINT_BLE_COUNT;
+     }
+ 
+     LOG_ERR("Invalid transport %d", endpoint.transport);
+@@ -171,10 +180,22 @@ struct zmk_endpoint_instance zmk_endpoint_get_preferred(void) {
+ 
+ struct zmk_endpoint_instance zmk_endpoint_get_selected(void) { return current_instance; }
+ 
+-bool zmk_endpoint_is_connected(void) { return current_instance.transport != ZMK_TRANSPORT_NONE; }
++bool zmk_endpoint_is_connected(void) {
++#if IS_ENABLED(CONFIG_APEX_G4B_RADIO_INPUT)
++    if (current_instance.transport == ZMK_TRANSPORT_RADIO) return apex_radio_input_connected();
++#endif
++    return current_instance.transport != ZMK_TRANSPORT_NONE;
++}
+ 
+ static int send_keyboard_report(void) {
+     switch (current_instance.transport) {
++#if IS_ENABLED(CONFIG_APEX_G4B_RADIO_INPUT)
++    case ZMK_TRANSPORT_RADIO: {
++        struct zmk_hid_keyboard_report *r = zmk_hid_get_keyboard_report();
++        BUILD_ASSERT(sizeof(r->body) == APEX_INPUT_KEYBOARD_SIZE);
++        return apex_radio_queue_report(APEX_INPUT_KEYBOARD, (const uint8_t *)&r->body, sizeof(r->body));
++    }
++#endif
+     case ZMK_TRANSPORT_NONE:
+         return 0;
+ 
+@@ -212,6 +233,13 @@ static int send_keyboard_report(void) {
+ 
+ static int send_consumer_report(void) {
+     switch (current_instance.transport) {
++#if IS_ENABLED(CONFIG_APEX_G4B_RADIO_INPUT)
++    case ZMK_TRANSPORT_RADIO: {
++        struct zmk_hid_consumer_report *r = zmk_hid_get_consumer_report();
++        BUILD_ASSERT(sizeof(r->body) == APEX_INPUT_CONSUMER_SIZE);
++        return apex_radio_queue_report(APEX_INPUT_CONSUMER, (const uint8_t *)&r->body, sizeof(r->body));
++    }
++#endif
+     case ZMK_TRANSPORT_NONE:
+         return 0;
+ 
+@@ -422,6 +450,11 @@ static bool is_ble_ready(void) {
+ }
+ 
+ static enum zmk_transport get_selected_transport(void) {
++#if IS_ENABLED(CONFIG_APEX_G4B_RADIO_INPUT)
++    /* The physical switch chooses radio ownership. A configured USB HID host
++     * takes priority; VBUS from a charger alone does not select USB. */
++    if (g4b_mode_boot_dongle()) return is_usb_ready() ? ZMK_TRANSPORT_USB : ZMK_TRANSPORT_RADIO;
++#endif
+     switch (preferred_transport) {
+     case ZMK_TRANSPORT_NONE:
+         LOG_DBG("No endpoint transport selected");
+@@ -464,6 +497,9 @@ static int zmk_endpoints_init(void) {
+ #endif
+ 
+     current_instance = get_selected_instance();
++#if IS_ENABLED(CONFIG_APEX_G4B_RADIO_INPUT)
++    apex_radio_input_select(current_instance.transport == ZMK_TRANSPORT_RADIO);
++#endif
+ 
+     return 0;
+ }
+@@ -487,6 +523,9 @@ static void update_current_endpoint(void) {
+         zmk_endpoint_clear_reports();
+ 
+         current_instance = new_instance;
++#if IS_ENABLED(CONFIG_APEX_G4B_RADIO_INPUT)
++        apex_radio_input_select(current_instance.transport == ZMK_TRANSPORT_RADIO);
++#endif
+ 
+         char endpoint_str[ZMK_ENDPOINT_STR_LEN];
+         zmk_endpoint_instance_to_str(current_instance, endpoint_str, sizeof(endpoint_str));
+diff --git a/app/include/zmk/endpoints.h b/app/include/zmk/endpoints.h
+index c10e387..acb8f7f 100644
+--- a/app/include/zmk/endpoints.h
++++ b/app/include/zmk/endpoints.h
+@@ -15,6 +15,7 @@
+ #define ZMK_ENDPOINT_STR_LEN 10
+ 
+ #define ZMK_ENDPOINT_NONE_COUNT 1
++#define ZMK_ENDPOINT_RADIO_COUNT IS_ENABLED(CONFIG_APEX_G4B_RADIO_INPUT)
+ 
+ #ifdef CONFIG_ZMK_USB
+ #define ZMK_ENDPOINT_USB_COUNT 1
+@@ -36,7 +37,7 @@
+  * be used in any persistent storage.
+  */
+ #define ZMK_ENDPOINT_COUNT                                                                         \
+-    (ZMK_ENDPOINT_NONE_COUNT + ZMK_ENDPOINT_USB_COUNT + ZMK_ENDPOINT_BLE_COUNT)
++    (ZMK_ENDPOINT_NONE_COUNT + ZMK_ENDPOINT_USB_COUNT + ZMK_ENDPOINT_BLE_COUNT + ZMK_ENDPOINT_RADIO_COUNT)
+ 
+ bool zmk_endpoint_instance_eq(struct zmk_endpoint_instance a, struct zmk_endpoint_instance b);
+ 
+diff --git a/app/include/zmk/endpoints_types.h b/app/include/zmk/endpoints_types.h
+index 5117544..55467a9 100644
+--- a/app/include/zmk/endpoints_types.h
++++ b/app/include/zmk/endpoints_types.h
+@@ -14,6 +14,7 @@ enum zmk_transport {
+     ZMK_TRANSPORT_NONE = 0,
+     ZMK_TRANSPORT_USB = 1,
+     ZMK_TRANSPORT_BLE = 2,
++    ZMK_TRANSPORT_RADIO = 3,
+ };
+ 
+ /**

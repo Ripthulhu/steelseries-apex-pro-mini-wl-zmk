@@ -100,7 +100,6 @@ def verify_release_config(artifact_dir: Path) -> None:
         "APEX_G4B_AB_CRASHTEST": "n",
         "APEX_G4B_COREDUMP": "y",
         "APEX_G4B_DONGLE_RADIO": "n",
-        "APEX_G4B_ESB": "n",
         "APEX_G4B_EVIDENCE_USB": "n",
         "APEX_G4B_KBD_CAPTURE": "n",
         "APEX_G4B_KBD_TELEMETRY": "n",

@@ -115,8 +115,8 @@ Do not override the following in a normal local build:
   flash, and charger drivers own their peripherals directly.
 - `CONFIG_ARM_MPU`, `CONFIG_HW_STACK_PROTECTION`, `CONFIG_SRAM_SIZE`, or the
   application partition. They are tied to the board's custom memory layout.
-- `CONFIG_APEX_G4B_DONGLE_RADIO` or `CONFIG_APEX_G4B_ESB`. The 2.4 GHz dongle
-  protocol is unfinished and is not part of release firmware.
+- `CONFIG_APEX_G4B_DONGLE_RADIO`. This releases the Bluetooth controller for
+  radio development; it does not enable a working dongle connection.
 
 If Kconfig warns that a value was ignored, do not force it elsewhere. Some
 symbols are selected by another feature or calculated by Zephyr. Change the

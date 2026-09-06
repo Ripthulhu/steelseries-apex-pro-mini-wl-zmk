@@ -48,9 +48,6 @@
 #if IS_ENABLED(CONFIG_APEX_G4B_AB_ROLLBACK)
 #include "ab_rollback_g4b.h"
 #endif
-#if IS_ENABLED(CONFIG_APEX_G4B_DONGLE_LINK)
-#include "dongle_link_g4b.h"
-#endif
 
 BUILD_ASSERT(CONFIG_APEX_G4B_STAGE >= 0 && CONFIG_APEX_G4B_STAGE <= 7,
              "stages 0 through 7 are design-frozen");
@@ -3752,13 +3749,6 @@ static void s3_run_keyboard(void)
                 continue;
             }
 
-#if IS_ENABLED(CONFIG_APEX_G4B_DONGLE_LINK)
-            /* Tap every valid absolute bitmap into the 2.4 GHz operational-link
-             * report queue. The module dedups internally (independent of ZMK's
-             * kscan state, which may be disabled in dongle mode) and queues the
-             * all-zero release too. */
-            g4b_dongle_link_on_bitmap(s2_rx);
-#endif
 
             /* Deduplicate against the previous absolute bitmap. ATTN is event
              * gated, so a changed bitmap must be accepted on its first successful
@@ -4714,21 +4704,12 @@ emit:
     /* Enter the permanent scan loop only after pin checks and scanner setup
      * succeed. A failed bring-up leaves the scanner off and lets the watchdog
      * hand control back to the bootloader. */
-    /* An experimental dongle build gives its radio thread the CPU in the dongle
-     * position. Normal releases compile that transport out and keep scanning.
-     * The operational-link build (DONGLE_LINK) is the exception: the scanner
-     * must keep running so its absolute bitmaps can be queued for the radio, so
-     * s3_run_keyboard() runs even in the dongle position there. The link runs on
-     * its own thread (g4b_dongle_link_tid). */
-    if (record.bringup_ok &&
-        (!IS_ENABLED(CONFIG_APEX_G4B_DONGLE_RADIO) ||
-         g4b_mode_get() != G4B_MODE_DONGLE ||
-         IS_ENABLED(CONFIG_APEX_G4B_DONGLE_LINK))) {
+    if (record.bringup_ok) {
         s3_run_keyboard();
     }
 #endif
 
-    /* A diagnostic build, failed bring-up, or experimental dongle handoff can
+    /* A diagnostic build or failed bring-up can
      * end here. The loop yields while still allowing staged RGB frames to flush. */
     for (;;) {
 #if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW)

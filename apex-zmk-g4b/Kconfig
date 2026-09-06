@@ -915,21 +915,52 @@ config APEX_G4B_UPDATER
 	  HID interface, so set CONFIG_USB_HID_DEVICE_COUNT to 4. See
 	  src/updater_g4b.c.
 
+rsource "../radio/Kconfig"
+
+config APEX_G4B_RADIO_PROBE
+	bool "Fixed-channel custom radio hardware test"
+	default n
+	depends on APEX_G4B_RADIO_PAIRING && APEX_G4B_DONGLE_RADIO
+	select TINYCRYPT_AES
+	select TINYCRYPT_AES_CCM
+	select TINYCRYPT_SHA256_HMAC
+	help
+	  Authenticate a connection to the custom receiver and exchange test
+	  packets at 10 Hz on 2440 MHz. This does not carry keyboard reports and
+	  has no channel hopping or wireless power management. Test builds only.
+
+config APEX_G4B_RADIO_INPUT
+	bool "Keyboard and consumer reports over the custom radio"
+	default n
+	depends on APEX_G4B_RADIO_PROBE
+	depends on ZMK_HID_REPORT_TYPE_HKRO && ZMK_HID_CONSUMER_REPORT_USAGES_FULL
+	help
+	  Add a radio endpoint with ordered report delivery. USB HID takes priority
+	  while connected to a data host. Requires a matching receiver input build.
+	  This stage uses the fixed-channel test scheduler, not the final 1 kHz link.
+
+config APEX_G4B_RADIO_PAIRING
+	bool "USB provisioning for the custom receiver"
+	default n
+	depends on APEX_G4B_SHELL && SETTINGS && APEX_G4B_SPINOR_FLASHDEV
+	depends on (USB_DEVICE_STACK || USB_DEVICE_STACK_NEXT) && SHELL_BACKEND_SERIAL
+	select TINYCRYPT
+	select TINYCRYPT_SHA256
+	help
+	  Add USB-only pairing commands to the apex shell. Store the receiver key
+	  in the existing external settings partition, separately from Bluetooth
+	  bonds. This does not enable radio transmission or change the flash layout.
+
 config APEX_G4B_DONGLE_RADIO
-	bool "Stand down the BLE controller in the dongle position (2.4GHz work)"
+	bool "Release the Bluetooth controller in dongle mode"
 	default n
 	depends on ZMK_BLE
 	help
-	  In the dongle switch position, tear down the Zephyr BLE controller with
-	  bt_disable() so the NRF_RADIO peripheral is freed for a bare-metal
-	  Enhanced-ShockBurst-compatible link to the vendor 2.4GHz receiver (the
-	  stock keyboard's protocol - 2 Mbit, CRC 0x11021, ESB pipe prefixes, no
-	  encryption). Radio ownership is a boot decision: moving the switch across
-	  the dongle boundary resets the board so the correct owner (BLE controller
-	  or, later, the ESB stack) comes up cleanly. This option only performs the
-	  standdown; the ESB transmitter is a separate option. With this off, the
-	  dongle position keeps the normal scanner active and behaves like USB-only.
-	  See src/radio_g4b.c.
+	  Call bt_disable() in the dongle switch position so a custom radio
+	  transport can take ownership of the radio peripherals. Switching between
+	  Bluetooth and dongle mode restarts the keyboard. This option only releases
+	  the controller; it does not implement a radio link. Leave it disabled in
+	  normal builds until the custom transport is available.
 
 config APEX_G4B_EVIDENCE_USB
 	bool "Mirror g4b_evidence text lines to the USB CDC (dfu_cdc)"
@@ -950,34 +981,6 @@ config APEX_G4B_DFU_TRIGGER
 	  by writing GPREGRET=0x57 and resetting the CPU. Requires the current USB
 	  CDC-ACM stack and CONFIG_UART_LINE_CTRL. The same port also accepts the
 	  APEXDFU! command; the keymap's apex_dfu behavior is independent of it.
-
-config APEX_G4B_ESB
-	bool "Bare-metal 2.4GHz ESB PHY for the vendor receiver (dongle)"
-	default n
-	depends on APEX_G4B_DONGLE_RADIO
-	help
-	  Compiles src/radio_esb_g4b.c, the hand-rolled 2.4GHz radio that reproduces
-	  the stock keyboard's on-air config to the SteelSeries receiver (MODE
-	  Ble_2Mbit, 4-byte address 0x412900+0x71, CRC-24 0x65B/0x00FFFFFF, whitening
-	  on). Runs only after the BLE controller has been stood down
-	  (APEX_G4B_DONGLE_RADIO) so NRF_RADIO is free. For now it only applies the
-	  register config and reports a read-back over the evidence UART; TX/RX and
-	  the pairing state machine build on top. See src/radio_esb_g4b.c.
-
-config APEX_G4B_DONGLE_LINK
-	bool "Operational (post-pairing) CCM link to the SteelSeries receiver"
-	default n
-	depends on APEX_G4B_ESB
-	help
-	  Compiles src/dongle_link_g4b.c, the operational 2.4GHz link that carries
-	  key reports after the receiver has bonded. It reuses the ESB PHY and TX/RX
-	  primitives (APEX_G4B_ESB) and assumes an existing bond, going straight to
-	  the receiver's clear A0/90/90 slot-counter exchange and the CCM-encrypted
-	  class-B0 type-2 handoff. When enabled, the STM32 scanner keeps running in
-	  the dongle position and its absolute key bitmaps are queued for the radio.
-	  SCAFFOLD: the microsecond TX->RX turnaround (stock TIMER2+PPI) and the exact
-	  CCM packing are not yet proven. Release firmware leaves it disabled. See
-	  src/dongle_link_g4b.c and work/DONGLE_RE_2026-09-04.md.
 
 config APEX_G4B_SPINOR_FLASHDEV
 	bool "Expose the external SPI-NOR as a Zephyr flash device (ZMK storage)"

@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: MIT
+config APEX_RADIO_TEST_CHANNEL
+    int "Fixed radio test channel (MHz above 2400)"
+    range 0 80
+    default 40
+    help
+      Both devices must use the same value. This selects a single frequency
+      for development measurements; it does not enable channel hopping.

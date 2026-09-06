@@ -1,0 +1,17 @@
+mainmenu "Apex receiver"
+source "Kconfig.zephyr"
+rsource "../radio/Kconfig"
+config APEX_RECEIVER_RADIO_PROBE
+    bool "Fixed-channel custom radio hardware test"
+    default n
+    select ENTROPY_GENERATOR
+config APEX_RECEIVER_RADIO_INPUT
+    bool "Receive keyboard and consumer reports"
+    default n
+    select APEX_RECEIVER_RADIO_PROBE
+    select USBD_HID_CLASS
+config APEX_RECEIVER_RADIO_EVENT_RX
+    bool "Wake radio processing on received packets"
+    default n
+    depends on APEX_RECEIVER_RADIO_PROBE
+    select DYNAMIC_INTERRUPTS

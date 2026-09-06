@@ -5,6 +5,12 @@
  * Compiled only when CONFIG_APEX_G4B_SHELL.
  */
 #include <zephyr/shell/shell.h>
+#if IS_ENABLED(CONFIG_APEX_G4B_RADIO_PAIRING)
+#include "apex_pair.h"
+#endif
+#if IS_ENABLED(CONFIG_APEX_G4B_RADIO_PROBE)
+#include "apex_radio_probe.h"
+#endif
 #include <zephyr/kernel.h>
 #include <zephyr/sys/reboot.h>
 #include <zephyr/init.h>
@@ -1180,6 +1186,14 @@ static int cmd_power(const struct shell *sh, size_t argc, char **argv)
 
 SHELL_STATIC_SUBCMD_SET_CREATE(
     apex_sub,
+#if IS_ENABLED(CONFIG_APEX_G4B_RADIO_PROBE)
+    SHELL_CMD_ARG(radio_test, NULL, "Radio connection and delivery counters.",
+                  apex_radio_probe_status, 1, 0),
+#endif
+#if IS_ENABLED(CONFIG_APEX_G4B_RADIO_PAIRING)
+    SHELL_CMD_ARG(pair, NULL, "USB radio pairing: status, write [replace], clear confirm.",
+                  apex_pair_shell, 1, 2),
+#endif
     SHELL_CMD(info, NULL,
               "One-shot dashboard: battery, charge, actuation, RT, RGB, temps, "
               "uptime, keypresses, active HID transport.\nUsage: apex info",

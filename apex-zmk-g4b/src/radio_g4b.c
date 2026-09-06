@@ -15,8 +15,8 @@
 #include "evidence_g4b.h"
 #include "mode_g4b.h"
 #include "radio_g4b.h"
-#if IS_ENABLED(CONFIG_APEX_G4B_ESB)
-#include "radio_esb_g4b.h"
+#if IS_ENABLED(CONFIG_APEX_G4B_RADIO_PROBE)
+#include "apex_radio_probe.h"
 #endif
 
 /* Bounded wait for the async bt_enable() to finish before teardown. The
@@ -104,11 +104,8 @@ static void standdown_work_fn(struct k_work *work)
 	/* NRF_RADIO is now idle (or the disable failed and BLE keeps it). */
 	standdown_emit();
 
-#if IS_ENABLED(CONFIG_APEX_G4B_ESB)
-	/* RADIO now free for ESB: bring up HFXO, apply the vendor PHY config, report it. */
-	if (status.stood_down) {
-		g4b_esb_on_radio_free();
-	}
+#if IS_ENABLED(CONFIG_APEX_G4B_RADIO_PROBE)
+	if (status.stood_down) apex_radio_probe_start(APEX_KEYBOARD);
 #endif
 }
 

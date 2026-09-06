@@ -99,6 +99,7 @@
   },
   "zmk_module_list": "apex-zmk-g4b/modules.txt",
   "patches": {
+    "apex-zmk-g4b/patches/0005-custom-radio-endpoint.patch": "6004b0f6a9ceed7dcf07c6d5278033a8ff0de42a6ce28ff9630139d12d076c0c",
     "apex-zmk-g4b/patches-messages/0001-apex-rpc-subsystem-proto.patch": "d44bdb9bfb4b4d87d9a7f9ea357b5d5eb4c1636f993e28ed3ac0971bce86cff6",
     "apex-zmk-g4b/patches/0001-usb_dc_nrfx-synthesise-USBPWRRDY.patch": "0fecb7003c4f0fa3354a6b8af98b8c7a5c4bbd75aaf8935d727b58fde9bcb29e",
     "apex-zmk-g4b/patches/0002-zmk-usb-device-next-migration.patch": "69fd30f79af8a6383c9f67ab70ec113d2ff204350cbbf9c29bf3045651484963",

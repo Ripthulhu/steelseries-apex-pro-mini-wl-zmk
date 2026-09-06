@@ -29,6 +29,20 @@ zephyr_library_sources_ifdef(CONFIG_APEX_G4B_UART_EVIDENCE src/evidence_g4b.c)
 # uses it; the Studio apex RPC subsystem will add its own condition later.
 zephyr_library_sources_ifdef(CONFIG_APEX_G4B_SHELL src/apex_control_g4b.c)
 zephyr_library_sources_ifdef(CONFIG_APEX_G4B_SHELL src/apex_shell_g4b.c)
+if(CONFIG_APEX_G4B_RADIO_PAIRING)
+  zephyr_library_include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../radio/include)
+  zephyr_library_sources(src/pair_g4b.c ../radio/src/apex_pair_shell.c)
+endif()
+if(CONFIG_APEX_G4B_RADIO_PROBE)
+  zephyr_library_sources(../radio/src/apex_packet.c ../radio/src/apex_connection.c
+                         ../radio/src/apex_radio_probe.c)
+endif()
+if(CONFIG_APEX_G4B_RADIO_INPUT)
+  zephyr_library_sources(../radio/src/apex_aes_ecb.c)
+  target_link_options(zephyr_interface INTERFACE "-Wl,--wrap=tc_aes_encrypt")
+  zephyr_include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../radio/include)
+  zephyr_library_sources(src/radio_input_g4b.c ../radio/src/apex_input.c)
+endif()
 # The `apex` ZMK Studio RPC subsystem (heatmap etc.). Needs ZMK_STUDIO; gated
 # with the shell build for now since it shares the apex_control API. It includes
 # the nanopb-generated proto headers, which land in the app's binary dir (the top
@@ -60,8 +74,6 @@ zephyr_include_directories_ifdef(CONFIG_APEX_G4B_LITTLEFS ${ZEPHYR_LITTLEFS_MODU
 zephyr_library_sources_ifdef(CONFIG_APEX_G4B_UPDATER src/updater_g4b.c)
 zephyr_library_sources_ifdef(CONFIG_APEX_G4B_AB_ROLLBACK src/ab_rollback_g4b.c)
 zephyr_library_sources_ifdef(CONFIG_APEX_G4B_DONGLE_RADIO src/radio_g4b.c)
-zephyr_library_sources_ifdef(CONFIG_APEX_G4B_ESB src/radio_esb_g4b.c)
-zephyr_library_sources_ifdef(CONFIG_APEX_G4B_DONGLE_LINK src/dongle_link_g4b.c)
 
 # s3_run_keyboard() has one call site. If a preprocessor edit removes that call,
 # -Wunused-function is the only build-time warning. Promote it to an error for
