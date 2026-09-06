@@ -179,6 +179,12 @@ def main() -> int:
     for patch in locked_patches(ROOT / "apex-zmk-g4b" / "patches"):
         apply_patch(zmk, patch)
 
+    # The apex Studio RPC subsystem adds proto to the zmk-studio-messages module
+    # (a west project pinned above), so patch that checkout too.
+    messages = work_root / LOCK["repositories"]["zmk_studio_messages"]["path"]
+    for patch in locked_patches(ROOT / "apex-zmk-g4b" / "patches-messages"):
+        apply_patch(messages, patch)
+
     sdk = zmk / ".zephyr-sdk"
     sdk_version = sdk / "sdk_version"
     expected_sdk = LOCK["zephyr_sdk"]

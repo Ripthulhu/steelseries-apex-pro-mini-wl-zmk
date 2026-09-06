@@ -42,10 +42,6 @@ enables and checks A/B recovery. The finished bundle includes
 | `CONFIG_APEX_G4B_STM32_IDLE_SCAN_PERIOD_MS` | `50` | Scanner period after five idle seconds on Bluetooth |
 | `CONFIG_APEX_G4B_STM32_LONG_IDLE_SCAN_PERIOD_MS` | `255` | Scanner period after one idle minute on Bluetooth |
 | `CONFIG_APEX_G4B_STM32_LONG_IDLE_AFTER_MS` | `60000` | Time before the second scanner idle tier |
-| `CONFIG_APEX_G4B_BAG_GUARD` | `y` | Suppress sustained multi-key pressure while on battery |
-| `CONFIG_APEX_G4B_BAG_KEYS` | `4` | Held-key count that starts the eight-second guard timer |
-| `CONFIG_APEX_G4B_BAG_IDLE_MS` | `8000` | Time before four to seven held keys are treated as bag pressure |
-| `CONFIG_APEX_G4B_BAG_POLL_MS` | `250` | Scanner period while the guard is active |
 | `CONFIG_ZMK_BATTERY_REPORT_INTERVAL` | `60` | Seconds between battery updates |
 | `CONFIG_APEX_G4B_CHARGE_STOP_PCT` | `80` | Stop-charging threshold |
 | `CONFIG_APEX_G4B_CHARGE_RESUME_PCT` | `72` | Resume-charging threshold |
@@ -54,12 +50,6 @@ enables and checks A/B recovery. The finished bundle includes
 The scanner period is stored in one byte, so 255 ms is its limit. These slower
 periods apply only on battery in Bluetooth mode. USB keeps the scanner at full
 speed, and a key immediately returns it to full speed.
-
-The bag guard handles sustained pressure rather than ordinary chords. Four to
-seven held keys engage it after eight seconds; eight or more engage it after one
-second. It turns RGB off, suppresses those key reports, and returns to normal
-once no more than two keys remain held. It is disabled whenever USB power is
-present.
 
 ## Release logging
 
@@ -72,6 +62,26 @@ enable one of those test features.
 `CONFIG_APEX_G4B_COREDUMP=y` is deliberately left on. It writes a small record
 to external flash only after a fatal fault, then resets so A/B recovery can do
 its job. It does not stream logs or run in the background.
+
+## USB data path
+
+`CONFIG_APEX_G4B_USB_DATA_VBUS_GATE` is **on by default**. It drives the U10 USB
+data switch from VBUS detection: the data pair is connected (P0.25 high) whenever
+the port carries voltage and isolated (P0.25 low) on battery. A cable therefore
+always powers the data path, so USB enumeration and the USB CDC shell, DFU, and
+Studio endpoints are reachable whenever the keyboard is plugged, whether USB or
+Bluetooth is the active output. The register-level trace of U10 is in
+[reverse-engineering/USB_DATA_PATH.md](reverse-engineering/USB_DATA_PATH.md).
+
+The pin boots high and the gate only drops it on confirmed battery operation, so
+it never gates the first enumeration or DFU recovery. Turning it off holds P0.25
+high at all times — the prior behavior, and harmless, it just leaves the data
+switch powered on battery where there is no host to reach.
+
+This is the safe half of the stock policy. Stock also cuts the data path in
+charge-only mode (a cable in for power while the output is Bluetooth or the
+dongle); this firmware does not, because that would drop the USB CDC debug
+endpoints while charging in Bluetooth mode.
 
 ## Watchdog
 

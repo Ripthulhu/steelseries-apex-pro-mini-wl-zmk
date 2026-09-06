@@ -35,6 +35,8 @@ zephyr_library_sources_ifdef(CONFIG_APEX_G4B_SHELL src/apex_shell_g4b.c)
 # not, so add it explicitly.
 zephyr_library_sources_ifdef(CONFIG_APEX_G4B_SHELL src/studio_apex_g4b.c)
 zephyr_library_include_directories_ifdef(CONFIG_APEX_G4B_SHELL ${CMAKE_BINARY_DIR})
+# Opt-in wireless shell over the BLE NUS service (default off; --ble-shell).
+zephyr_library_sources_ifdef(CONFIG_APEX_G4B_BLE_SHELL src/shell_ble_g4b.c)
 zephyr_library_sources_ifdef(CONFIG_APEX_G4B_GAMEPAD src/gamepad_g4b.c)
 zephyr_library_sources_ifdef(CONFIG_APEX_G4B_DFU_TRIGGER src/dfu_trigger_g4b.c)
 # Compiled for EVERY build of this board, not only gamepad builds. The keymap is

@@ -89,6 +89,8 @@ void   g4b_depth_force(bool on);
 void g4b_request_stm32_reset(void);   /* pulse STM32 EN low/high (scanner reboot) */
 void g4b_request_rgb_reset(void);     /* RGB rail cycle + IS31 re-init */
 void g4b_request_rgb_rail(bool on);   /* RGB rail power up(+init)/down */
+void g4b_request_rgb_gcurrent(uint8_t value); /* set IS31 global current 0..255 */
+void g4b_request_rgb_balance(uint8_t r, uint8_t g, uint8_t b); /* per-colour scaling */
 void g4b_request_usb_rail_reset(void);/* pulse USB rail P0.25 (re-enumerate; always restores) */
 
 /* Debug: send one raw 64-byte frame to the STM32 scanner and read its 64-byte
@@ -96,5 +98,11 @@ void g4b_request_usb_rail_reset(void);/* pulse USB rail P0.25 (re-enumerate; alw
  * g4b thread at the single-writer-safe point. Returns 0 on a clean exchange.
  * Callers MUST NOT send the damaging opcodes 0x01/0x02/0x32. */
 int g4b_scan_raw(const uint8_t *tx, uint32_t len, uint8_t *rx, uint32_t timeout_ms);
+
+/* Debug: run the RGB-controller read-back probe (connect P0.08 MISO, prove the
+ * SDO link with a sentinel, read open/short detection) on the g4b thread and
+ * copy the result out. Returns 0 on completion, negative on error. */
+struct g4b_rgb_readback;
+int g4b_rgb_read_request(struct g4b_rgb_readback *out, uint32_t timeout_ms);
 
 #endif /* APEX_G4B_ACTUATION_H */

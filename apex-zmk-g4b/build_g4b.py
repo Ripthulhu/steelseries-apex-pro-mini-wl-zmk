@@ -101,6 +101,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--shell", action="store_true",
                         help="debug build: apex UART shell + logging over a USB "
                              "CDC port (implies --plain-image; skips the release audit)")
+    parser.add_argument("--ble-shell", action="store_true",
+                        help="also expose the apex shell over BLE NUS (implies "
+                             "--shell; off until `apex bleshell on`)")
     parser.add_argument("--stop1-canary", action="store_true")
     parser.add_argument("--wireless-idle", "--mode3-canary", action="store_true")
     parser.add_argument("--ab-rollback", "--ab-canary", action="store_true")
@@ -140,6 +143,8 @@ def main() -> int:
         fail("--ab-crash-test requires --ab-rollback")
     if args.stop1_canary or args.wireless_idle or args.ab_rollback:
         args.plain_image = True
+    if args.ble_shell:
+        args.shell = True
     if args.shell:
         if not args.usb_studio:
             fail("--shell requires --usb-studio (uses g4b_usb.conf + g4b_usb.overlay)")
@@ -193,6 +198,8 @@ def main() -> int:
     conf_files.extend(HERE / name for enabled, name in additions if enabled)
     if args.shell:
         conf_files.append(HERE / "g4b_shell.conf")
+    if args.ble_shell:
+        conf_files.append(HERE / "g4b_ble_shell.conf")
     conf_files.extend(path.expanduser().resolve() for path in args.extra_conf)
     for path in conf_files:
         if not path.is_file():

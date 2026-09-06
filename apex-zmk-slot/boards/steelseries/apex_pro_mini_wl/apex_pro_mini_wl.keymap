@@ -23,6 +23,17 @@
             layers = <1>;
             bindings = <&apex_dfu>;
         };
+
+        /* Unlock ZMK Studio: hold Fn (layer 1) and press Delete + Right-Ctrl
+         * together. Physical positions: Delete = 13 (the Backspace/Del key,
+         * top-right), Right-Ctrl = 60 (bottom-right). Layer-gated and three-key
+         * so it cannot be hit by accident. */
+        combo_studio_unlock {
+            timeout-ms = <250>;
+            key-positions = <13 60>;
+            layers = <1>;
+            bindings = <&studio_unlock>;
+        };
     };
 
     keymap {

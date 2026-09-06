@@ -1,0 +1,42 @@
+diff --git a/app/src/studio/uart_rpc_transport.c b/app/src/studio/uart_rpc_transport.c
+index 6dcac6d..5c4e243 100644
+--- a/app/src/studio/uart_rpc_transport.c
++++ b/app/src/studio/uart_rpc_transport.c
+@@ -124,18 +124,34 @@ static void serial_cb(const struct device *dev, void *user_data) {
+ 
+     if (uart_irq_tx_ready(uart_dev)) {
+         struct ring_buf *tx_buf = zmk_rpc_get_tx_buf();
+-        uint32_t len;
+-        while ((len = ring_buf_size_get(tx_buf)) > 0) {
++
++        while (ring_buf_size_get(tx_buf) > 0) {
+             uint8_t *buf;
+             uint32_t claim_len = ring_buf_get_claim(tx_buf, &buf, tx_buf->size);
+ 
+             if (claim_len == 0) {
+-                continue;
++                break;
+             }
+ 
+             int sent = uart_fifo_fill(uart_dev, buf, claim_len);
+ 
+             ring_buf_get_finish(tx_buf, MAX(sent, 0));
++
++            /* Stop only when no byte moved: the TX FIFO is full because the host
++             * is not draining the CDC endpoint. Breaking here (rather than the
++             * original unbounded loop) keeps this ISR from spinning forever and
++             * wedging the CPU. A partial fill still loops so a large response
++             * drains fully while the host keeps reading. */
++            if (sent <= 0) {
++                break;
++            }
++        }
++
++        /* Nothing left to send: mask the TX interrupt so a filled or idle
++         * endpoint cannot immediately re-enter this handler. tx_notify()
++         * re-enables it when the next message is queued. */
++        if (ring_buf_size_get(tx_buf) == 0) {
++            uart_irq_tx_disable(uart_dev);
+         }
+     }
+ }

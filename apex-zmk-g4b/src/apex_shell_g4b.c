@@ -23,6 +23,9 @@
 #include "mode_g4b.h"
 #include "actuation_g4b.h" /* link stats + per-key depth + per-key actuation */
 #include "kscan_g4b.h"      /* APEX_G4B_KEY_COUNT */
+#if IS_ENABLED(CONFIG_APEX_G4B_BLE_SHELL)
+#include "shell_ble_g4b.h"
+#endif
 #endif
 #if IS_ENABLED(CONFIG_APEX_G4B_COREDUMP)
 #include "coredump_g4b.h"
@@ -84,6 +87,58 @@ static bool parse_mm_tenths(const char *s, uint8_t *out)
     }
     *out = (uint8_t)tenths;
     return true;
+}
+
+/* --- battery-drain logger ---------------------------------------------------
+ * There is no coulomb counter on this board and the BQ25895 current ADC reads
+ * charge current only (N/A on battery), so average draw is estimated from the
+ * pack's state-of-charge slope over a long idle window: arm the sampler, unplug
+ * USB, leave the keyboard idle on battery for hours, then replug and read it
+ * back. The shipped image runs with System OFF disabled (APEX_G4B_SLEEP_MS=0),
+ * so uptime is continuous on battery and this RAM ring survives the whole run;
+ * a reboot clears it (which reads as "no run"). */
+#define G4B_DRAIN_PACK_MAH       5870u  /* Fuji 4867A0, see twi_g4b.c */
+#define G4B_DRAIN_MAX_SAMPLES    120u
+#define G4B_DRAIN_MIN_INTERVAL_S 30u
+#define G4B_DRAIN_DEF_INTERVAL_S 300u   /* 5 min */
+
+struct g4b_drain_sample {
+    uint32_t t_s;
+    uint16_t mv;
+    uint8_t  pct;
+    uint8_t  charging;
+};
+static struct g4b_drain_sample g4b_drain_log[G4B_DRAIN_MAX_SAMPLES];
+static uint32_t g4b_drain_count;
+static uint32_t g4b_drain_interval_s;
+static bool g4b_drain_armed;
+
+static void g4b_drain_take_sample(void)
+{
+    struct apex_battery b;
+
+    if (g4b_drain_count >= G4B_DRAIN_MAX_SAMPLES || !apex_battery_read(&b)) {
+        return;
+    }
+    struct g4b_drain_sample *s = &g4b_drain_log[g4b_drain_count++];
+    s->t_s = (uint32_t)(k_uptime_get() / 1000);
+    s->mv = (uint16_t)b.millivolts;
+    s->pct = (uint8_t)b.percent;
+    s->charging = b.charging ? 1u : 0u;
+}
+
+static void g4b_drain_work_fn(struct k_work *work);
+static K_WORK_DELAYABLE_DEFINE(g4b_drain_dwork, g4b_drain_work_fn);
+static void g4b_drain_work_fn(struct k_work *work)
+{
+    ARG_UNUSED(work);
+    if (!g4b_drain_armed) {
+        return;
+    }
+    g4b_drain_take_sample();
+    if (g4b_drain_count < G4B_DRAIN_MAX_SAMPLES) {
+        (void)k_work_reschedule(&g4b_drain_dwork, K_SECONDS(g4b_drain_interval_s));
+    }
 }
 
 static int cmd_battery(const struct shell *sh, size_t argc, char **argv)
@@ -150,6 +205,190 @@ static int cmd_charge(const struct shell *sh, size_t argc, char **argv)
                 c.stop_pct, c.resume_pct);
     return 0;
 }
+
+static int cmd_drain(const struct shell *sh, size_t argc, char **argv)
+{
+    if (argc >= 2 && !strcmp(argv[1], "start")) {
+        uint32_t interval = G4B_DRAIN_DEF_INTERVAL_S;
+
+        if (argc >= 3) {
+            long minutes = strtol(argv[2], NULL, 10);
+            if (minutes > 0) {
+                interval = (uint32_t)minutes * 60u;
+            }
+        }
+        if (interval < G4B_DRAIN_MIN_INTERVAL_S) {
+            interval = G4B_DRAIN_MIN_INTERVAL_S;
+        }
+        g4b_drain_interval_s = interval;
+        g4b_drain_count = 0u;
+        g4b_drain_armed = true;
+        g4b_drain_take_sample(); /* baseline */
+        (void)k_work_reschedule(&g4b_drain_dwork, K_SECONDS(interval));
+        shell_print(sh, "drain run armed: every %u s, up to %u samples (~%u h span).",
+                    interval, G4B_DRAIN_MAX_SAMPLES,
+                    (interval * G4B_DRAIN_MAX_SAMPLES) / 3600u);
+        shell_print(sh, "unplug USB, leave the keyboard idle on battery, then replug and run "
+                        "`apex drain`. A reboot clears the run.");
+        if (g4b_drain_count) {
+            shell_print(sh, "baseline: %u mV  %u%%%s", g4b_drain_log[0].mv,
+                        g4b_drain_log[0].pct,
+                        g4b_drain_log[0].charging ? "  (charging - unplug to measure)" : "");
+        }
+        return 0;
+    }
+    if (argc >= 2 && !strcmp(argv[1], "stop")) {
+        g4b_drain_armed = false;
+        (void)k_work_cancel_delayable(&g4b_drain_dwork);
+        shell_print(sh, "drain run stopped; %u samples kept (`apex drain` still shows them).",
+                    g4b_drain_count);
+        return 0;
+    }
+
+    if (g4b_drain_count == 0u) {
+        shell_print(sh, "no drain run. Start one with `apex drain start [minutes]`.");
+        return 0;
+    }
+
+    shell_print(sh, "drain log (%s, every %u s, %u samples):",
+                g4b_drain_armed ? "running" : "stopped", g4b_drain_interval_s,
+                g4b_drain_count);
+    bool any_charging = false;
+    for (uint32_t i = 0u; i < g4b_drain_count; i++) {
+        struct g4b_drain_sample *s = &g4b_drain_log[i];
+        any_charging |= (bool)s->charging;
+        shell_print(sh, "  t=%5u min  %u mV  %u%%%s",
+                    (s->t_s - g4b_drain_log[0].t_s) / 60u, s->mv, s->pct,
+                    s->charging ? "  chg" : "");
+    }
+    if (g4b_drain_count < 2u) {
+        shell_print(sh, "need at least two samples for an estimate.");
+        return 0;
+    }
+
+    struct g4b_drain_sample *first = &g4b_drain_log[0];
+    struct g4b_drain_sample *last = &g4b_drain_log[g4b_drain_count - 1u];
+    uint32_t dt_s = (last->t_s > first->t_s) ? (last->t_s - first->t_s) : 0u;
+    int dpct = (int)first->pct - (int)last->pct;
+    int dmv = (int)first->mv - (int)last->mv;
+
+    shell_print(sh, "window %u min  dV=%d mV  dSoC=%d%%", dt_s / 60u, dmv, dpct);
+    if (dt_s > 0u && dpct > 0) {
+        uint32_t mah = (G4B_DRAIN_PACK_MAH * (uint32_t)dpct) / 100u;
+        uint32_t ma = (mah * 3600u) / dt_s;
+        shell_print(sh, "estimated average draw: ~%u mA  (%u mAh over %u min)",
+                    ma, mah, dt_s / 60u);
+    } else {
+        shell_print(sh, "SoC did not drop - window too short or the pack was charging. "
+                        "Leave it unplugged and idle for several hours.");
+    }
+    if (any_charging) {
+        shell_print(sh, "note: samples marked `chg` were on USB power, not battery drain.");
+    }
+    shell_print(sh, "SoC is coarse (1%% = %u mAh); a few-mA idle needs many hours for a clean "
+                    "figure. Compare configs (RGB on/off, etc.) rather than trusting absolutes.",
+                G4B_DRAIN_PACK_MAH / 100u);
+    return 0;
+}
+
+#if IS_ENABLED(CONFIG_APEX_G4B_BLE_SHELL)
+static int cmd_bleshell(const struct shell *sh, size_t argc, char **argv)
+{
+    if (argc >= 2 && !strcmp(argv[1], "on")) {
+        g4b_ble_shell_set_enabled(true);
+        shell_print(sh, "BLE shell ON (persisted). Connect a NUS client to reach `apex-ble$`.");
+    } else if (argc >= 2 && !strcmp(argv[1], "off")) {
+        g4b_ble_shell_set_enabled(false);
+        shell_print(sh, "BLE shell OFF (persisted).");
+    } else {
+        shell_print(sh, "BLE shell: %s (persisted); NUS client %s",
+                    g4b_ble_shell_is_enabled() ? "ON" : "off",
+                    g4b_ble_shell_subscribed() ? "subscribed" : "not connected");
+    }
+    return 0;
+}
+#endif
+
+#if IS_ENABLED(CONFIG_APEX_G4B_RGB_READBACK)
+/* Decode one 33-byte open/short result page and print the faulted channels.
+ * Each register holds 6 valid bits (D5:D0) mapping to CS1..CS18 across three
+ * registers per SW line; 11 SW * 3 = 33 registers = 198 channels. */
+static void rgbread_report(const struct shell *sh, const char *label,
+                           const uint8_t *regs)
+{
+    unsigned set = 0u;
+
+    for (uint32_t i = 0u; i < G4B_RGB_OSD_REGS; i++) {
+        for (uint32_t b = 0u; b < 6u; b++) {
+            if (regs[i] & BIT(b)) {
+                set++;
+            }
+        }
+    }
+
+    shell_fprintf(sh, SHELL_NORMAL, "%s: %u channel(s)", label, set);
+    if (set) {
+        shell_fprintf(sh, SHELL_NORMAL, " ->");
+        for (uint32_t i = 0u; i < G4B_RGB_OSD_REGS; i++) {
+            for (uint32_t b = 0u; b < 6u; b++) {
+                if (regs[i] & BIT(b)) {
+                    shell_fprintf(sh, SHELL_NORMAL, " SW%u/CS%u",
+                                  (unsigned)(i / 3u + 1u),
+                                  (unsigned)((i % 3u) * 6u + b + 1u));
+                }
+            }
+        }
+    }
+    shell_fprintf(sh, SHELL_NORMAL, "\n");
+}
+
+static int cmd_rgbread(const struct shell *sh, size_t argc, char **argv)
+{
+    struct g4b_rgb_readback rb;
+    int rc;
+
+    if (g4b_rgb_is_blanked()) {
+        shell_print(sh, "RGB is idle-blanked; press a key to wake it, then retry.");
+        return 0;
+    }
+
+    rc = g4b_rgb_read_request(&rb, 500u);
+    if (rc) {
+        shell_print(sh, "rgbread failed: %d", rc);
+        return 0;
+    }
+
+    shell_print(sh, "function regs read: cfg=0x%02x gcc=0x%02x pull=0x%02x",
+                rb.cfg, rb.gcc, rb.pull);
+    shell_print(sh, "sentinel: wrote 0x%02x read 0x%02x -> MISO/SDO %s",
+                0x5Au, rb.sentinel, rb.wired ? "WIRED" : "not connected");
+    if (rb.wired) {
+        static const uint16_t ts_c[4] = { 140u, 120u, 100u, 90u };
+        static const uint8_t  trof_pct[4] = { 100u, 75u, 55u, 30u };
+        unsigned ts = (rb.temp >> 2) & 0x3u;
+        unsigned trof = rb.temp & 0x3u;
+        shell_print(sh, "thermal (0x24=0x%02x): roll-off start %u C, output at %u%%%s",
+                    rb.temp, ts_c[ts], trof_pct[trof],
+                    trof ? " (throttling)" : "");
+        /* Integrity check: the run config should read back 0x09 (SSD=1, D3=1).
+         * A mismatch means the last bring-up did not take (wedged bus / rail
+         * glitch) and the array would be dark or wrong until a re-init. */
+        shell_print(sh, "config integrity: %s",
+                    rb.cfg == 0x09u ? "OK (re-init held)"
+                                    : "MISMATCH - controller lost its config");
+    }
+    if (!rb.wired) {
+        shell_print(sh, "P0.08 is not returning the controller's SDO; per-LED "
+                        "open/short is not available on this board.");
+        return 0;
+    }
+
+    rgbread_report(sh, "open ", rb.open);
+    rgbread_report(sh, "short", rb.shorted);
+    shell_print(sh, "(a set bit = fault; a fully working LED shows none)");
+    return 0;
+}
+#endif
 
 static int cmd_act(const struct shell *sh, size_t argc, char **argv)
 {
@@ -251,6 +490,47 @@ static int cmd_rgb(const struct shell *sh, size_t argc, char **argv)
 #else
         shell_error(sh, "underglow not built in");
 #endif
+        return 0;
+    }
+    if (argc >= 2 && !strcmp(argv[1], "gain")) {
+        if (argc >= 3) {
+            long v = strtol(argv[2], NULL, 0);
+            if (v < 0 || v > 255) {
+                shell_error(sh, "usage: apex rgb gain [0..255]");
+                return -EINVAL;
+            }
+            g4b_request_rgb_gcurrent((uint8_t)v);
+            g4b_settings_mark_dirty();
+            shell_print(sh, "global current -> 0x%02x (applied on the RGB thread, "
+                        "persisted)", (unsigned)v);
+        } else {
+            shell_print(sh, "global current: 0x%02x (master current scale, all "
+                        "channels; keeps colour depth, unlike PWM dimming)",
+                        g4b_rgb_get_gcurrent());
+        }
+        return 0;
+    }
+    if (argc >= 2 && !strcmp(argv[1], "balance")) {
+        if (argc >= 5) {
+            long r = strtol(argv[2], NULL, 0);
+            long g = strtol(argv[3], NULL, 0);
+            long b = strtol(argv[4], NULL, 0);
+            if (r < 0 || r > 255 || g < 0 || g > 255 || b < 0 || b > 255) {
+                shell_error(sh, "usage: apex rgb balance <r> <g> <b>  (each 0..255)");
+                return -EINVAL;
+            }
+            g4b_request_rgb_balance((uint8_t)r, (uint8_t)g, (uint8_t)b);
+            g4b_settings_mark_dirty();
+            shell_print(sh, "colour balance -> R=0x%02x G=0x%02x B=0x%02x "
+                        "(applied on the RGB thread, persisted)",
+                        (unsigned)r, (unsigned)g, (unsigned)b);
+        } else {
+            uint8_t r, g, b;
+            g4b_rgb_get_balance(&r, &g, &b);
+            shell_print(sh, "colour balance: R=0x%02x G=0x%02x B=0x%02x "
+                        "(per-colour scaling under every effect; 0xFF = full)",
+                        r, g, b);
+        }
         return 0;
     }
     if (argc >= 2 && !strcmp(argv[1], "color")) {
@@ -869,6 +1149,22 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
               "No args prints the current config. vreg is hard-clamped <=4400 mV "
               "(pack rated max). limit: 80=4096mV, 100=4352mV.",
               cmd_charge),
+    SHELL_CMD(drain, NULL,
+              "Battery-drain logger: estimate average current over an idle window.\n"
+              "Usage: apex drain [start [minutes] | stop]\n"
+              "start arms a sampler (default 5 min); unplug USB, leave the keyboard idle on "
+              "battery for hours, then replug and run `apex drain` to see mV/SoC over time and "
+              "an estimated mA. A reboot clears the run.",
+              cmd_drain),
+#if IS_ENABLED(CONFIG_APEX_G4B_BLE_SHELL)
+    SHELL_CMD(bleshell, NULL,
+              "Wireless apex shell over BLE (Nordic UART Service). Persisted.\n"
+              "Usage: apex bleshell [on|off]\n"
+              "on exposes the `apex` console over BLE to a connected NUS client "
+              "(nRF Connect / a web-Bluetooth terminal) while HID keeps typing; the "
+              "setting survives reboot. No args shows state.",
+              cmd_bleshell),
+#endif
     SHELL_CMD(act, NULL,
               "Actuation point - global (ladder 1.0-3.0 mm) or per-key (full 0.2-3.8 mm).\n"
               "Usage: apex act [<mm>]                 global, e.g. apex act 1.5\n"
@@ -882,10 +1178,21 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
               "No args prints current state.",
               cmd_rt),
     SHELL_CMD(rgb, NULL,
-              "RGB effects + brightness.\n"
-              "Usage: apex rgb [<index 0..11> | bright up|down]\n"
-              "No args lists the 12 effects and marks the active one.",
+              "RGB effects + brightness + tuning.\n"
+              "Usage: apex rgb [<index 0..11> | bright up|down | gain [0..255] |\n"
+              "                 balance <r> <g> <b>]\n"
+              "gain = IS31 global current (master scale, keeps colour depth unlike "
+              "PWM dimming). balance = per-colour white/tint trim. Both persist. "
+              "No args lists the effects.",
               cmd_rgb),
+#if IS_ENABLED(CONFIG_APEX_G4B_RGB_READBACK)
+    SHELL_CMD(rgbread, NULL,
+              "RGB-controller read-back probe (diagnostic).\n"
+              "Connects P0.08 (SPIM2 MISO) to the IS31FL3743B SDO, proves the "
+              "link with a sentinel, then reads open/short detection and reports "
+              "any faulted LED channels as SWx/CSy.",
+              cmd_rgbread),
+#endif
     SHELL_CMD(temp, NULL,
               "Temperatures.\n"
               "Usage: apex temp\n"
@@ -994,11 +1301,22 @@ SHELL_CMD_REGISTER(apex, &apex_sub,
 /* Quiet the log flood so the interactive shell is usable by default. Logs stay
  * COMPILED at their full level (ZMK is DBG), so the runtime level can be raised
  * again on demand: `log enable dbg zmk`, `log enable inf`, or `log go`/`log halt`.
- * Runs from a delayed work item ~300 ms after boot, after every backend
- * (including the shell log backend) has registered, so the filter sticks. */
+ *
+ * The shell log backend re-opens every source to its compiled level when it
+ * activates during USB/CDC bring-up, which lands after a single early pass and
+ * undoes it - which is why ZMK's per-second zmk_usb_get_conn_state DBG line
+ * still reached the shell. Re-assert the filter once per second across the first
+ * APEX_QUIET_LOGS_PASSES seconds so the quiet survives that activation, then
+ * stop so `log enable ...` works on demand afterwards. */
+#define APEX_QUIET_LOGS_PASSES 20u
+
+static void apex_quiet_logs_work(struct k_work *work);
+static K_WORK_DELAYABLE_DEFINE(apex_quiet_logs_dwork, apex_quiet_logs_work);
+
 static void apex_quiet_logs_work(struct k_work *work)
 {
     ARG_UNUSED(work);
+    static uint8_t passes;
     uint32_t sources = log_src_cnt_get(0);
     int backends = log_backend_count_get();
     for (int b = 0; b < backends; b++) {
@@ -1007,8 +1325,10 @@ static void apex_quiet_logs_work(struct k_work *work)
             (void)log_filter_set(be, 0, (int16_t)s, LOG_LEVEL_ERR);
         }
     }
+    if (++passes < APEX_QUIET_LOGS_PASSES) {
+        (void)k_work_reschedule(&apex_quiet_logs_dwork, K_SECONDS(1));
+    }
 }
-static K_WORK_DELAYABLE_DEFINE(apex_quiet_logs_dwork, apex_quiet_logs_work);
 
 static int apex_quiet_logs_init(void)
 {

@@ -150,6 +150,57 @@ static void rgb_func_write(uint8_t reg, uint8_t value)
     spim2_write(frame, sizeof(frame));
 }
 
+#if IS_ENABLED(CONFIG_APEX_G4B_RGB_READBACK)
+/* One CS-framed full-duplex read. Sends {read command, start register} then
+ * clocks `count` dummy bytes; the controller drives its data on MISO from the
+ * third byte on, auto-incrementing the register pointer. out[] receives the
+ * `count` data bytes. read_cmd is the write command with D7 set (e.g. 0xD2 for
+ * the function page). Needs PSEL.MISO connected by the caller. */
+#define G4B_RGB_READ_MAX 40u
+static uint8_t rgb_read_tx[2u + G4B_RGB_READ_MAX];
+static uint8_t rgb_read_rx[2u + G4B_RGB_READ_MAX];
+
+static void spim2_read(uint8_t read_cmd, uint8_t start_reg, uint8_t *out,
+                       uint32_t count)
+{
+    uint32_t start;
+    uint32_t len = 2u + count;
+
+    if (count > G4B_RGB_READ_MAX) {
+        return;
+    }
+    rgb_read_tx[0] = read_cmd;
+    rgb_read_tx[1] = start_reg;
+    memset(&rgb_read_tx[2], 0, count);
+    memset(rgb_read_rx, 0, len);
+
+    g4b_rgb_cs_low();
+
+    NRF_SPIM2->TXD.PTR = (uint32_t)rgb_read_tx;
+    NRF_SPIM2->TXD.MAXCNT = len;
+    NRF_SPIM2->RXD.PTR = (uint32_t)rgb_read_rx;
+    NRF_SPIM2->RXD.MAXCNT = len;
+    NRF_SPIM2->TXD.LIST = 0u;
+    NRF_SPIM2->RXD.LIST = 0u;
+    NRF_SPIM2->EVENTS_END = 0u;
+    (void)NRF_SPIM2->EVENTS_END;
+
+    NRF_SPIM2->TASKS_START = 1u;
+
+    start = k_cycle_get_32();
+    while (NRF_SPIM2->EVENTS_END == 0u) {
+        if (k_cyc_to_us_floor32(k_cycle_get_32() - start) > G4B_RGB_END_US) {
+            break;
+        }
+    }
+
+    g4b_rgb_cs_high();
+
+    /* Data begins after the command and address bytes. */
+    memcpy(out, &rgb_read_rx[2], count);
+}
+#endif /* CONFIG_APEX_G4B_RGB_READBACK */
+
 /* Fill a whole 198-register page (PWM or scaling) with one value. */
 static void rgb_page_fill(uint8_t command, uint8_t value)
 {
@@ -173,14 +224,144 @@ static void rgb_page_fill(uint8_t command, uint8_t value)
  * software shutdown, then leave shutdown and set the current reference. This
  * prevents stale PWM state from becoming visible after a rail cycle.
  */
+/* Master current scale (function reg 0x01) and per-colour scaling balance
+ * (scaling page 0x51), remembered across the idle rail cycle so bring-up
+ * re-applies them after the controller loses state. Balance is a global white/
+ * tint trim: each colour's scaling multiplies its PWM current, so lowering one
+ * shifts the whole board's colour without touching any effect. */
+static uint8_t rgb_gcurrent = G4B_RGB_GCURRENT;
+static uint8_t rgb_scale_r = 0xFFu;
+static uint8_t rgb_scale_g = 0xFFu;
+static uint8_t rgb_scale_b = 0xFFu;
+
+/* Write the scaling page as a repeating per-LED [B, G, R] pattern (the order the
+ * controller stores each LED in), applying the global colour balance. */
+static void rgb_scale_apply(void)
+{
+    static uint8_t frame[2u + G4B_RGB_CHANNELS];
+
+    frame[0] = G4B_RGB_CMD_SCALE;
+    frame[1] = 0x01u;
+    for (uint32_t led = 0u; led < G4B_RGB_LEDS; led++) {
+        uint8_t *p = &frame[2u + led * 3u];
+        p[0] = rgb_scale_b;
+        p[1] = rgb_scale_g;
+        p[2] = rgb_scale_r;
+    }
+    spim2_write(frame, sizeof(frame));
+}
+
 void g4b_rgb_bringup(void)
 {
     rgb_page_fill(G4B_RGB_CMD_PWM, 0x00u);
-    rgb_page_fill(G4B_RGB_CMD_SCALE, 0xFFu);
+    rgb_scale_apply();
     rgb_func_write(G4B_RGB_FN_PULL, G4B_RGB_PULL);
     rgb_func_write(G4B_RGB_FN_CONFIG, G4B_RGB_CONFIG_RUN);
-    rgb_func_write(G4B_RGB_FN_GCURRENT, G4B_RGB_GCURRENT);
+    rgb_func_write(G4B_RGB_FN_GCURRENT, rgb_gcurrent);
 }
+
+void g4b_rgb_set_balance(uint8_t r, uint8_t g, uint8_t b)
+{
+    rgb_scale_r = r;
+    rgb_scale_g = g;
+    rgb_scale_b = b;
+    if (!g4b_rgb_is_blanked()) {
+        rgb_scale_apply();
+    }
+}
+
+void g4b_rgb_get_balance(uint8_t *r, uint8_t *g, uint8_t *b)
+{
+    *r = rgb_scale_r;
+    *g = rgb_scale_g;
+    *b = rgb_scale_b;
+}
+
+void g4b_rgb_set_gcurrent(uint8_t value)
+{
+    rgb_gcurrent = value;
+    /* Apply now if the bus is live; if the array is idle-blanked the rail is
+     * down and the value is picked up by the next bring-up. */
+    if (!g4b_rgb_is_blanked()) {
+        rgb_func_write(G4B_RGB_FN_GCURRENT, value);
+    }
+}
+
+uint8_t g4b_rgb_get_gcurrent(void)
+{
+    return rgb_gcurrent;
+}
+
+#if IS_ENABLED(CONFIG_APEX_G4B_RGB_READBACK)
+/* Function-page read command: write command (0x52) with the R/W bit (D7) set. */
+#define G4B_RGB_READ_FUNC 0xD2u
+/* Configuration-register values with the open/short-detect enable bits set.
+ * D3 must be 1, SSD (D0) = 1 for normal operation, OSDE (D2:D1) selects the
+ * mode: 01 = open, 10 = short. */
+#define G4B_RGB_CONFIG_OPEN  0x0Bu /* 0000 1 01 1 */
+#define G4B_RGB_CONFIG_SHORT 0x0Du /* 0000 1 10 1 */
+/* Detection prerequisites (datasheet OPEN/SHORT DETECT: case 1). */
+#define G4B_RGB_OSD_GCC   0x0Fu
+#define G4B_RGB_OSD_PULL  0x00u
+#define G4B_RGB_OSD_FIRST 0x03u /* first open/short result register */
+#define G4B_RGB_FN_TEMP   0x24u /* thermal status register */
+#define G4B_RGB_SENTINEL  0x5Au /* distinctive value for the wiring proof */
+
+static void rgb_detect_pass(uint8_t config_mode, uint8_t *out)
+{
+    /* One-off trigger: OSDE must go 00 -> mode (clear before set). */
+    rgb_func_write(G4B_RGB_FN_CONFIG, G4B_RGB_CONFIG_RUN);
+    rgb_func_write(G4B_RGB_FN_CONFIG, config_mode);
+    k_msleep(3); /* datasheet: valid after >= 2 scan cycles (~66 us) */
+    spim2_read(G4B_RGB_READ_FUNC, G4B_RGB_OSD_FIRST, out, G4B_RGB_OSD_REGS);
+}
+
+void g4b_rgb_readback_run(struct g4b_rgb_readback *out)
+{
+    uint8_t known[3] = {0};
+
+    memset(out, 0, sizeof(*out));
+
+    g4b_rgb_miso_enable();
+    NRF_SPIM2->PSEL.MISO = 8u; /* P0.08 */
+    __DSB();
+
+    /* Snapshot of the three configured function registers and thermal status. */
+    spim2_read(G4B_RGB_READ_FUNC, G4B_RGB_FN_CONFIG, known, 3u);
+    out->cfg = known[0];
+    out->gcc = known[1];
+    out->pull = known[2];
+    spim2_read(G4B_RGB_READ_FUNC, G4B_RGB_FN_TEMP, &out->temp, 1u);
+
+    /* Definitive wiring proof: write a distinctive value and read it back. A
+     * healthy board has no open LEDs, so the open registers alone cannot tell a
+     * wired-but-clean result from a floating-low MISO - the sentinel can. */
+    rgb_func_write(G4B_RGB_FN_GCURRENT, G4B_RGB_SENTINEL);
+    spim2_read(G4B_RGB_READ_FUNC, G4B_RGB_FN_GCURRENT, &out->sentinel, 1u);
+    out->wired = (out->sentinel == G4B_RGB_SENTINEL);
+
+    if (out->wired) {
+        /* Light every channel at full current so each one refreshes: off/low
+         * dots are not reliably scanned for open/short. PWM and scaling both to
+         * full, independent of the user's colour balance, or a dimmed channel
+         * reads as not-open. Dim GCC (0x0F) and brief, so it is a faint flash. */
+        rgb_page_fill(G4B_RGB_CMD_PWM, 0xFFu);
+        rgb_page_fill(G4B_RGB_CMD_SCALE, 0xFFu);
+        rgb_func_write(G4B_RGB_FN_PULL, G4B_RGB_OSD_PULL);
+        rgb_func_write(G4B_RGB_FN_GCURRENT, G4B_RGB_OSD_GCC);
+
+        rgb_detect_pass(G4B_RGB_CONFIG_OPEN, out->open);
+        rgb_detect_pass(G4B_RGB_CONFIG_SHORT, out->shorted);
+    }
+
+    /* Restore the controller and repaint the real frame on the next flush. */
+    NRF_SPIM2->PSEL.MISO = 0xFFFFFFFFu;
+    __DSB();
+    g4b_rgb_miso_disable();
+    g4b_rgb_bringup();
+    g4b_rgb_mark_pending();
+}
+#endif /* CONFIG_APEX_G4B_RGB_READBACK */
 
 int g4b_rgb_init(void)
 {

@@ -369,6 +369,22 @@ config APEX_G4B_RGB_PROBE
 	  lights look blue" produced two wrong answers; this produces one right
 	  one. Turn it off once the order is known.
 
+config APEX_G4B_RGB_READBACK
+	bool "Enable the RGB-controller read-back probe (apex rgbread)"
+	default n
+	depends on APEX_G4B_RGB && APEX_G4B_SHELL
+	help
+	  Diagnostic only. Adds the `apex rgbread` shell command, which connects the
+	  RGB controller's SDO line to the Nordic's SPIM2 MISO (P0.08), proves the
+	  link with a sentinel write/read, and if it holds, reads back the
+	  IS31FL3743B open- and short-detection result registers to report which
+	  LED channels are open or shorted.
+
+	  Whether P0.08 is physically routed to the controller's SDO pad is not
+	  confirmed on this board; this probe answers that empirically. It briefly
+	  reconfigures SPIM2 and flashes the array dim while detecting, so it is
+	  off by default. See docs/reverse-engineering/RGB_CONTROLLER.md.
+
 config APEX_G4B_RGB_IDLE_MS
 	int "Begin fading RGB after this many ms of key idle in Bluetooth mode"
 	default 30000
@@ -385,6 +401,26 @@ config APEX_G4B_RGB_IDLE_MS
 	  the Bluetooth timeout still applies while it powers the keyboard.
 
 	  0 disables the timeout.
+
+config APEX_G4B_USB_DATA_VBUS_GATE
+	bool "Drive the USB data path (U10 / P0.25) from VBUS detection"
+	default y
+	depends on APEX_G4B_SPIM_KSCAN && ZMK_USB
+	help
+	  Connect the USB-C data pair to the Nordic (P0.25 high) whenever the port
+	  carries voltage, and isolate it (P0.25 low) on battery. See
+	  docs/reverse-engineering/USB_DATA_PATH.md for the U10 register-level trace.
+
+	  This is the safe half of the stock policy. Stock also cuts the data path
+	  in charge-only mode - a cable in for power while the output is Bluetooth or
+	  the dongle - but this firmware serves its shell, DFU, and Studio RPC over
+	  USB CDC, so those endpoints must stay reachable whenever a cable is
+	  present. Gating on VBUS keeps them up while still isolating the pair when
+	  there is no host to talk to.
+
+	  The pin boots high, and the gate only ever drops it on confirmed battery
+	  operation, so it cannot strand USB enumeration or DFU recovery. Turning
+	  this off holds P0.25 high at all times, the prior behavior.
 
 config APEX_G4B_SLEEP_MS
 	int "Enter System OFF after this many ms of key idle, on battery only"
@@ -617,46 +653,6 @@ config APEX_G4B_STM32_STOP1_ALLOW_USB
 	  Permit this known-failing stop/resume reproduction while VBUS is
 	  present so evidence can be observed over CDC during a controlled bench
 	  test. Leave this off in a daily build.
-
-config APEX_G4B_BAG_GUARD
-	bool "Ignore bag/pocket key mashing to save battery"
-	default y
-	help
-	  Sustained pressure in a bag can hold several Hall switches down and keep
-	  the scanner loop active. On battery, treat a continuously high key count
-	  as bag pressure: suppress those reports, turn RGB off, and use the slower
-	  poll period until the key count returns to two or fewer. Individual keys
-	  may chatter without resetting the timer. The guard never engages on USB.
-
-config APEX_G4B_BAG_KEYS
-	int "Keys held at once to suspect a bag"
-	default 4
-	range 2 30
-	depends on APEX_G4B_BAG_GUARD
-	help
-	  At or above this many simultaneously held keys, start the bag-pressure
-	  timer. The timer resets when the count falls to two or fewer. Eight or more
-	  keys use a separate one-second threshold in link_g4b.c.
-
-config APEX_G4B_BAG_IDLE_MS
-	int "No-activity time before bag pressure is assumed, ms"
-	default 8000
-	range 0 600000
-	depends on APEX_G4B_BAG_GUARD
-	help
-	  How long the configured key count must remain high before the guard
-	  engages. The timer tolerates individual keys moving while the total stays
-	  above two. Eight or more held keys engage after one second instead.
-
-config APEX_G4B_BAG_POLL_MS
-	int "Scan poll interval while a bag is detected, ms"
-	default 250
-	range 20 2000
-	depends on APEX_G4B_BAG_GUARD
-	help
-	  While the guard is active, sleep this long between reads instead of polling
-	  every millisecond. This also bounds how quickly normal scanning resumes
-	  after the pressure is removed.
 
 config APEX_G4B_BATT_PROBE
 	bool "Periodically sample every candidate battery-sense source"
@@ -1072,3 +1068,17 @@ config APEX_G4B_SHELL
 	  image: it adds RAM/flash and can perturb the scanner/radio timing. Enabled
 	  via build_g4b.py --shell (which also defines APEX_G4B_SHELL_DTS to add the
 	  shell CDC port in g4b_usb.overlay).
+
+config APEX_G4B_BLE_SHELL
+	bool "Debug: expose the apex shell wirelessly over BLE NUS"
+	default n
+	depends on APEX_G4B_SHELL && ZMK_BLE
+	select BT_ZEPHYR_NUS
+	help
+	  Adds a second shell instance whose transport is the BLE Nordic UART
+	  Service (src/shell_ble_g4b.c), so a NUS client on a connected host
+	  reaches the apex console wirelessly while HID keeps typing. The service
+	  is additive GATT and never touches advertising. The bridge is gated by a
+	  persisted runtime enable (settings key apxbl/on): off by default, turned
+	  on for good with 'apex bleshell on', so it is not an ambient wireless
+	  debug surface. Opt-in via build_g4b.py --ble-shell.

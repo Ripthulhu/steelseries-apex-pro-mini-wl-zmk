@@ -321,6 +321,21 @@ void g4b_usb_rail_pulse(uint32_t low_ms)
     __DSB();
 }
 
+/* Set the USB data-path level directly. connect=true drives P0.25 high (data
+ * pair reaches the Nordic), false drives it low (isolated). Matches stock's
+ * connect/cut levels; used only by the opt-in USB_DATA_ISOLATE policy so the
+ * shipped debug path keeps the pin high. Level only; the pin is already an
+ * output. */
+void g4b_usb_rail_set(bool connect)
+{
+    if (connect) {
+        NRF_P0->OUTSET = BIT(G4B_RAIL_USB);
+    } else {
+        NRF_P0->OUTCLR = BIT(G4B_RAIL_USB);
+    }
+    __DSB();
+}
+
 /* RGB chip-select on P0.11.
  *
  * The IS31FL3743B hangs off SPIM2 (SCK P1.09, MOSI P1.08) with its hardware
@@ -361,6 +376,25 @@ void g4b_rgb_cs_low(void)
 void g4b_rgb_cs_high(void)
 {
     NRF_P0->OUTSET = BIT(G4B_RGB_CS_PIN);
+}
+
+/* RGB-controller MISO (SDO) on P0.08 - normally unused because the LED driver
+ * is written write-only. The readback diagnostic connects it as an input with a
+ * pull-down: an unrouted pad then reads a clean low, while the controller's
+ * push-pull SDO (VOL/VOH at 8 mA) easily overrides the ~13 kOhm internal pull.
+ * Left disconnected the rest of the time. */
+#define G4B_RGB_MISO_PIN 8u
+
+void g4b_rgb_miso_enable(void)
+{
+    NRF_P0->PIN_CNF[G4B_RGB_MISO_PIN] = G4B_CNF_MISO_IN;
+    __DSB();
+}
+
+void g4b_rgb_miso_disable(void)
+{
+    NRF_P0->PIN_CNF[G4B_RGB_MISO_PIN] = G4B_CNF_IN_NOPULL;
+    __DSB();
 }
 
 /* --- Read-only pin survey ------------------------------------------------

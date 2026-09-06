@@ -130,6 +130,15 @@ void g4b_rgb_rail_down(void);
  * re-enumeration. Always restored to high within the call. g4b thread only. */
 void g4b_usb_rail_pulse(uint32_t low_ms);
 
+/* Drive the USB data-path (P0.25) level: true = high (connected), false = low
+ * (isolated). Used only by the opt-in USB_DATA_ISOLATE policy. */
+void g4b_usb_rail_set(bool connect);
+
+/* Connect / release the RGB-controller MISO pad (P0.08) for the readback
+ * diagnostic. Enable configures it as a pulled-down input; disable releases it. */
+void g4b_rgb_miso_enable(void);
+void g4b_rgb_miso_disable(void);
+
 void g4b_pin_survey(uint32_t p0_mask, uint32_t p1_mask,
                     uint32_t *p0_up, uint32_t *p1_up,
                     uint32_t *p0_down, uint32_t *p1_down);

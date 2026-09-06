@@ -1,0 +1,100 @@
+diff --git a/proto/zmk/apex.options.in b/proto/zmk/apex.options.in
+new file mode 100644
+index 0000000..203ba89
+--- /dev/null
++++ b/proto/zmk/apex.options.in
+@@ -0,0 +1,2 @@
++zmk.apex.Heatmap.counts max_count:128
++zmk.apex.Actuation.per_key_tenths max_count:70
+diff --git a/proto/zmk/apex.proto b/proto/zmk/apex.proto
+new file mode 100644
+index 0000000..1b4e93b
+--- /dev/null
++++ b/proto/zmk/apex.proto
+@@ -0,0 +1,58 @@
++// Apex Pro Mini WL custom Studio RPC subsystem.
++syntax = "proto3";
++
++package zmk.apex;
++
++message Request {
++    oneof request_type {
++        bool apex_get_heatmap = 1;
++        bool apex_reset_heatmap = 2;
++        bool apex_get_status = 3;
++        bool apex_get_actuation = 4;
++        SetKeyActuation apex_set_key_actuation = 5;
++    }
++}
++
++message Response {
++    oneof response_type {
++        Heatmap apex_get_heatmap = 1;
++        bool apex_reset_heatmap = 2;
++        Status apex_get_status = 3;
++        Actuation apex_get_actuation = 4;
++        bool apex_set_key_actuation = 5;
++    }
++}
++
++// Live status for a Studio panel: battery + temperatures.
++message Status {
++    uint32 battery_mv = 1;
++    uint32 battery_pct = 2;
++    bool charging = 3;
++    sint32 batt_temp_c = 4;   // battery pack temp (BQ TS-pin NTC), whole degC
++    bool batt_temp_valid = 5;
++    sint32 die_temp_dc = 6;   // SoC die temp, tenths of a degC
++    bool die_temp_valid = 7;
++}
++
++// Usage heatmap: per-keymap-position press counts. Index = keymap position, so
++// the host maps it straight onto the physical layout it already has.
++message Heatmap {
++    repeated uint32 counts = 1;
++    uint32 total = 2;
++    uint32 peak = 3; // largest single-key count, for normalisation
++}
++
++// Per-key actuation state. Index = STM32 scan index (0..69). per_key_tenths is
++// the depth in tenths of a millimetre, or 0 where the key follows the global
++// point. global_tenths is the current global actuation.
++message Actuation {
++    uint32 global_tenths = 1;
++    repeated uint32 per_key_tenths = 2;
++}
++
++// Set one key's actuation. key = STM32 scan index; tenths = depth in tenths of a
++// mm (2..38 = 0.2..3.8 mm), or 0 to clear the override (follow global).
++message SetKeyActuation {
++    uint32 key = 1;
++    uint32 tenths = 2;
++}
+diff --git a/proto/zmk/studio.proto b/proto/zmk/studio.proto
+index 2ec0535..23f05a0 100644
+--- a/proto/zmk/studio.proto
++++ b/proto/zmk/studio.proto
+@@ -7,6 +7,7 @@ import "meta.proto";
+ import "core.proto";
+ import "behaviors.proto";
+ import "keymap.proto";
++import "apex.proto";
+ 
+ message Request {
+     uint32 request_id = 1;
+@@ -15,6 +16,7 @@ message Request {
+         zmk.core.Request core = 3;
+         zmk.behaviors.Request behaviors = 4;
+         zmk.keymap.Request keymap = 5;
++        zmk.apex.Request apex = 6;
+     }
+ }
+ 
+@@ -32,6 +34,7 @@ message RequestResponse {
+         zmk.core.Response core = 3;
+         zmk.behaviors.Response behaviors = 4;
+         zmk.keymap.Response keymap = 5;
++        zmk.apex.Response apex = 6;
+     }
+ }
+ 

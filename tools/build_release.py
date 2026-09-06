@@ -119,15 +119,21 @@ def verify_release_config(artifact_dir: Path) -> None:
         "FAULT_DUMP": "0",
         "FILE_SYSTEM": "n",
         "INIT_STACKS": "n",
-        "LOG": "n",
-        "PRINTK": "n",
+        # The shell ships enabled (interactive apex console + SWD-replacement
+        # tools + apex Studio RPC). Logging comes with it but stays sensible:
+        # deferred mode so it cannot block the scanner/radio timing, real strings
+        # (ZMK_LOGGING_MINIMAL off), quieted to errors at boot by the runtime
+        # filter in apex_shell_g4b.c, and raisable per-module from the shell.
+        "LOG": "y",
+        "LOG_MODE_DEFERRED": "y",
+        "PRINTK": "y",
         "RTT_CONSOLE": "n",
-        "SHELL": "n",
+        "SHELL": "y",
         "TEST": "n",
         "THREAD_ANALYZER": "n",
         "TRACING": "n",
         "USE_SEGGER_RTT": "n",
-        "ZMK_LOGGING_MINIMAL": "y",
+        "ZMK_LOGGING_MINIMAL": "n",
     }
     wrong = {
         name: (config.get(name, "n"), expected)
@@ -152,7 +158,6 @@ def verify_release_config(artifact_dir: Path) -> None:
         "APEX_G4B_RGB",
         "APEX_G4B_ANALOG_PROBE",
         "APEX_G4B_GAMEPAD",
-        "APEX_G4B_BAG_GUARD",
         "APEX_G4B_TWI",
         "APEX_G4B_CHARGE_LIMIT",
         "APEX_G4B_CHARGE_STORAGE",
@@ -165,6 +170,8 @@ def verify_release_config(artifact_dir: Path) -> None:
         "APEX_G4B_COREDUMP",
         "APEX_G4B_WATCHDOG",
         "APEX_G4B_SPINOR",
+        "APEX_G4B_SHELL",
+        "APEX_G4B_USB_DATA_VBUS_GATE",
     }
     unexpected = sorted(
         name for name, value in config.items()
@@ -176,7 +183,8 @@ def verify_release_config(artifact_dir: Path) -> None:
             "release configuration enables non-release board features: "
             + ", ".join(f"CONFIG_{name}" for name in unexpected)
         )
-    print("Release configuration: A/B enabled; debug output and test features disabled")
+    print("Release configuration: A/B + shell enabled; deferred sensible logging; "
+          "test-only diagnostics disabled")
 
 
 def copy_release_file(source: Path, destination: Path) -> None:
@@ -200,10 +208,12 @@ def recipe_hash() -> str:
 
 
 def build_app(work_root: Path, python: Path, extra_conf: list[Path]) -> Path:
+    release_shell_conf = ROOT / "apex-zmk-g4b" / "g4b_shell_release.conf"
     command: list[str | Path] = [
         python, ROOT / "apex-zmk-g4b" / "build_g4b.py", "--stage", "3",
         "--usb-studio", "--kscan-ingest", "--persistent", "--plain-image",
-        "--wireless-idle", "--ab-rollback", "--work-root", work_root,
+        "--wireless-idle", "--ab-rollback", "--shell",
+        "--extra-conf", release_shell_conf, "--work-root", work_root,
     ]
     for path in extra_conf:
         command.extend(("--extra-conf", path))

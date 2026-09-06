@@ -526,6 +526,8 @@ static volatile uint8_t s3_req_stm32_reset;
 static volatile uint8_t s3_req_rgb_reset;
 static volatile uint8_t s3_req_usb_reset;
 static volatile int8_t  s3_req_rgb_rail = -1; /* -1 none, 0 = power down, 1 = up */
+static volatile int16_t s3_req_rgb_gcc = -1;  /* -1 none, else 0..255 GCC value */
+static volatile int32_t s3_req_rgb_balance = -1; /* -1 none, else (r<<16)|(g<<8)|b */
 
 /* Shell-requested RAW STM32 frame exchange (a debug tool for the scanner
  * protocol). The shell fills s3_raw_tx and sets pending; the g4b thread runs one
@@ -536,6 +538,14 @@ static volatile uint8_t s3_req_raw_done;
 static volatile uint8_t s3_req_raw_ok;
 static uint8_t s3_raw_tx[G4B_SPIM_FRAME];
 static uint8_t s3_raw_rx[G4B_SPIM_FRAME];
+
+#if IS_ENABLED(CONFIG_APEX_G4B_RGB_READBACK)
+/* Shell-requested RGB read-back probe. Same hand-off: the shell raises the
+ * request and the g4b thread runs it at the single-writer-safe point. */
+static volatile uint8_t s3_req_rgbread_pending;
+static volatile uint8_t s3_req_rgbread_done;
+static struct g4b_rgb_readback s3_rgbread_result;
+#endif
 
 void g4b_request_stm32_reset(void)
 {
@@ -552,6 +562,14 @@ void g4b_request_rgb_reset(void)
 void g4b_request_rgb_rail(bool on)
 {
     s3_req_rgb_rail = on ? 1 : 0;
+}
+void g4b_request_rgb_gcurrent(uint8_t value)
+{
+    s3_req_rgb_gcc = (int16_t)value;
+}
+void g4b_request_rgb_balance(uint8_t r, uint8_t g, uint8_t b)
+{
+    s3_req_rgb_balance = ((int32_t)r << 16) | ((int32_t)g << 8) | (int32_t)b;
 }
 
 /* Send one raw 64-byte frame to the STM32 and return its reply. Called from the
@@ -584,6 +602,33 @@ int g4b_scan_raw(const uint8_t *tx, uint32_t len, uint8_t *rx, uint32_t timeout_
     memcpy(rx, s3_raw_rx, G4B_SPIM_FRAME);
     return s3_req_raw_ok ? 0 : -EIO;
 }
+
+#if IS_ENABLED(CONFIG_APEX_G4B_RGB_READBACK)
+int g4b_rgb_read_request(struct g4b_rgb_readback *out, uint32_t timeout_ms)
+{
+    if (out == NULL) {
+        return -EINVAL;
+    }
+    if (s3_req_rgbread_pending) {
+        return -EBUSY;
+    }
+    s3_req_rgbread_done = 0u;
+    __DMB();
+    s3_req_rgbread_pending = 1u; /* hand off to the g4b thread */
+
+    uint32_t waited = 0u;
+    while (!s3_req_rgbread_done && waited < timeout_ms) {
+        k_msleep(2);
+        waited += 2u;
+    }
+    if (!s3_req_rgbread_done) {
+        s3_req_rgbread_pending = 0u;
+        return -ETIMEDOUT;
+    }
+    *out = s3_rgbread_result;
+    return 0;
+}
+#endif
 
 /* Full scanner re-bring-up (the 59-frame boot config replay); defined below,
  * forward-declared for the raw-frame recovery below. */
@@ -634,6 +679,16 @@ static void s3_service_shell_requests(void)
         __DMB();
         s3_req_raw_done = 1u;
     }
+#if IS_ENABLED(CONFIG_APEX_G4B_RGB_READBACK)
+    if (s3_req_rgbread_pending) {
+        /* Connect P0.08 MISO, prove the SDO link, read open/short detection,
+         * then restore the controller. Owns SPIM2 here. */
+        g4b_rgb_readback_run(&s3_rgbread_result);
+        s3_req_rgbread_pending = 0u;
+        __DMB();
+        s3_req_rgbread_done = 1u;
+    }
+#endif
 #if IS_ENABLED(CONFIG_APEX_G4B_RGB)
     if (s3_req_rgb_reset) {
         s3_req_rgb_reset = 0u;
@@ -651,6 +706,16 @@ static void s3_service_shell_requests(void)
             g4b_rgb_rail_up();
             g4b_rgb_bringup();
         }
+    }
+    if (s3_req_rgb_gcc >= 0) {
+        uint8_t v = (uint8_t)s3_req_rgb_gcc;
+        s3_req_rgb_gcc = -1;
+        g4b_rgb_set_gcurrent(v);
+    }
+    if (s3_req_rgb_balance >= 0) {
+        int32_t v = s3_req_rgb_balance;
+        s3_req_rgb_balance = -1;
+        g4b_rgb_set_balance((uint8_t)(v >> 16), (uint8_t)(v >> 8), (uint8_t)v);
     }
 #endif
 }
@@ -1510,18 +1575,6 @@ static void s3_run_poll(uint32_t start, uint32_t deadline_cycles)
 static uint32_t s3_ingest_events;
 static uint32_t s3_a0_polls;
 static uint32_t s3_last_activity_ms;
-#if IS_ENABLED(CONFIG_APEX_G4B_BAG_GUARD)
-/* Bag/pocket guard state. s3_bag_active is true while the loop is held in its
- * slow-poll state; s3_bag_timing/s3_bag_since time how long the key COUNT has
- * stayed high. A count this obviously large is never a real chord, so it
- * engages after only a short settle instead of the full idle window.
- */
-static bool s3_bag_active;
-static bool s3_bag_timing;
-static uint32_t s3_bag_since;
-#define G4B_BAG_OBVIOUS_KEYS   8u
-#define G4B_BAG_OBVIOUS_IDLE_MS 1000u
-#endif
 
 #if IS_ENABLED(CONFIG_APEX_G4B_UART_EVIDENCE)
 /* Tiny decimal/string formatters. Defined here rather than next to the boot
@@ -1594,17 +1647,25 @@ static void s3_rgb_idle_update(void)
     bool want_on = g4b_mode_get() != G4B_MODE_BT || usb_selected ||
                    (now - s3_last_activity_ms) < (uint32_t)CONFIG_APEX_G4B_RGB_IDLE_MS;
 
-#if IS_ENABLED(CONFIG_APEX_G4B_BAG_GUARD)
-    /* A bag squeeze keeps the activity clock fresh through key chatter, so the
-     * normal RGB idle would never blank. Force the LEDs off while bagged - they
-     * are the largest single draw on the board, so leaving them lit would
-     * undo most of the guard's saving. */
-    if (s3_bag_active) {
-        want_on = false;
+    g4b_rgb_idle_tick(want_on, now);
+
+#if IS_ENABLED(CONFIG_APEX_G4B_USB_DATA_VBUS_GATE) && IS_ENABLED(CONFIG_ZMK_USB)
+    /* Drive the USB data-path switch (U10 / P0.25) from VBUS detection: connect
+     * the data pair whenever the port carries voltage, isolate it on battery.
+     * A cable always powers the data path, so USB enumeration - and the USB CDC
+     * shell, DFU, and Studio endpoints - is reachable whenever plugged, whether
+     * USB or Bluetooth is the active output. The pin boots high (the loader
+     * leaves it high), so the first enumeration is never gated on this tick;
+     * only battery operation drops it. VBUSDETECT, not the USB software state,
+     * so a stale SUSPEND after unplug does not hold the path on. */
+    bool connect = s3_usb_is_powered();
+
+    static bool u10_state = true; /* loader leaves the pin high at boot */
+    if (connect != u10_state) {
+        g4b_usb_rail_set(connect);
+        u10_state = connect;
     }
 #endif
-
-    g4b_rgb_idle_tick(want_on, now);
 }
 #else
 static inline void s3_rgb_idle_update(void) {}
@@ -1650,6 +1711,14 @@ static void g4b_settings_save_work(struct k_work *work)
     ARG_UNUSED(work);
     (void)settings_save_one("apex/switch", &st, sizeof(st));
     (void)settings_save_one("apex/perkey", s3_perkey_tenths, sizeof(s3_perkey_tenths));
+#if IS_ENABLED(CONFIG_APEX_G4B_RGB)
+    {
+        uint8_t r, g, b;
+        g4b_rgb_get_balance(&r, &g, &b);
+        uint8_t rgt[4] = { g4b_rgb_get_gcurrent(), r, g, b };
+        (void)settings_save_one("apex/rgb", rgt, sizeof(rgt));
+    }
+#endif
 }
 
 /* Debounced, deliberately. Every one of these controls is a key someone will
@@ -1684,6 +1753,24 @@ static int g4b_settings_set(const char *name, size_t len,
         }
         return 0;
     }
+
+#if IS_ENABLED(CONFIG_APEX_G4B_RGB)
+    /* RGB tuning: {global current, scale R, scale G, scale B}. Raised as g4b
+     * requests so the values are applied on the scanner thread, after bring-up. */
+    if (settings_name_steq(name, "rgb", &next) && next == NULL) {
+        uint8_t rgt[4];
+
+        if (len != sizeof(rgt)) {
+            return -EINVAL;
+        }
+        if (read_cb(cb_arg, rgt, sizeof(rgt)) < 0) {
+            return -EIO;
+        }
+        g4b_request_rgb_gcurrent(rgt[0]);
+        g4b_request_rgb_balance(rgt[1], rgt[2], rgt[3]);
+        return 0;
+    }
+#endif
 
     if (!settings_name_steq(name, "switch", &next) || next != NULL) {
         return -ENOENT;
@@ -3609,49 +3696,6 @@ static void s3_run_keyboard(void)
             s3_mode3_keys_down = bits != 0u;
 #endif
 
-#if IS_ENABLED(CONFIG_APEX_G4B_BAG_GUARD) && \
-    !IS_ENABLED(CONFIG_APEX_G4B_KBD_CAPTURE)
-            {
-                bool bag_powered = false;
-#if IS_ENABLED(CONFIG_ZMK_USB)
-                bag_powered = s3_usb_is_powered();
-#endif
-                /* Bag guard uses sustained key count rather than activity time,
-                 * because pressure can make individual Hall switches chatter.
-                 * It engages only on battery, uses hysteresis until the keyboard
-                 * is calm, suppresses the implausible reports, blanks RGB, and
-                 * polls slowly while ATTN remains high. Run it before the normal
-                 * plausibility guard so large key counts enter the slow path.
-                 */
-                uint32_t bnow = k_uptime_get_32();
-                uint32_t bag_idle = (bits >= G4B_BAG_OBVIOUS_KEYS)
-                                        ? G4B_BAG_OBVIOUS_IDLE_MS
-                                        : (uint32_t)CONFIG_APEX_G4B_BAG_IDLE_MS;
-                bool bag_engage, bag_hold;
-
-                if (bits >= (uint32_t)CONFIG_APEX_G4B_BAG_KEYS) {
-                    if (!s3_bag_timing) {
-                        s3_bag_timing = true;
-                        s3_bag_since = bnow;
-                    }
-                } else if (bits <= 2u) {
-                    s3_bag_timing = false;
-                }
-
-                bag_engage = s3_bag_timing &&
-                             bits >= (uint32_t)CONFIG_APEX_G4B_BAG_KEYS &&
-                             (bnow - s3_bag_since) >= bag_idle;
-                bag_hold = s3_bag_active && bits > 2u; /* sticky until calm */
-
-                if (!bag_powered && (bag_engage || bag_hold)) {
-                    s3_bag_active = true;
-                    k_msleep((uint32_t)CONFIG_APEX_G4B_BAG_POLL_MS);
-                    continue;
-                }
-                s3_bag_active = false;
-            }
-#endif
-
 #if IS_ENABLED(CONFIG_APEX_G4B_KBD_CAPTURE)
             /* Capture the read; never ingest, so this build cannot spam. Record
              * the popcount distribution and keep the first few non-empty reads
@@ -3748,13 +3792,6 @@ static void s3_run_keyboard(void)
                 s3_last_activity_ms = k_uptime_get_32();
             }
         } else {
-#if IS_ENABLED(CONFIG_APEX_G4B_BAG_GUARD)
-            /* ATTN low means every key is released, so whatever held keys down
-             * (bag or hand) is gone: clear the bag state and its timer so the
-             * RGB and the fast loop come straight back. */
-            s3_bag_active = false;
-            s3_bag_timing = false;
-#endif
             /* Close a pending key/entry ordering race, or cancel slow cadence,
              * before any other housekeeping/configuration frame. */
             if (s3_mode3_normalize_if_needed()) {

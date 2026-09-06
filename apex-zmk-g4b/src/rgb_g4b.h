@@ -82,4 +82,41 @@ void g4b_rgb_idle_tick(bool want_on, uint32_t now);
 bool g4b_rgb_fading(void);
 bool g4b_rgb_is_blanked(void);
 
+/* --- Controller read-back diagnostic (opt-in) ----------------------------
+ * The IS31FL3743B supports SPI register reads, but only if its SDO pad is
+ * routed to the Nordic's SPIM2 MISO (P0.08) - unconfirmed on this PCB, and our
+ * driver otherwise leaves MISO disconnected. This probe connects MISO, proves
+ * the link with a sentinel write/read, and if it holds, reads back the chip's
+ * open- and short-detection result registers. See docs/reverse-engineering/
+ * RGB_CONTROLLER.md. Run only from the g4b thread (single SPIM2 writer).
+ */
+#define G4B_RGB_OSD_REGS 33u /* function-page 0x03..0x23 */
+
+struct g4b_rgb_readback {
+    bool    wired;                    /* sentinel read matched what we wrote */
+    uint8_t cfg;                      /* function reg 0x00 as read */
+    uint8_t gcc;                      /* function reg 0x01 as read */
+    uint8_t pull;                     /* function reg 0x02 as read */
+    uint8_t temp;                     /* function reg 0x24 thermal status */
+    uint8_t sentinel;                 /* GCC read back after writing the sentinel */
+    uint8_t open[G4B_RGB_OSD_REGS];   /* open-detection result 0x03..0x23 */
+    uint8_t shorted[G4B_RGB_OSD_REGS];/* short-detection result 0x03..0x23 */
+};
+
+void g4b_rgb_readback_run(struct g4b_rgb_readback *out);
+
+/* Global Current Control (function reg 0x01): a master current scale applied to
+ * every channel, 0x00..0xFF. Unlike lowering PWM it keeps full colour depth, so
+ * it is the right knob for a brightness/power trade-off. The setter writes the
+ * controller immediately (g4b thread only) and is remembered across the idle
+ * rail cycle, so g4b_rgb_bringup() re-applies it after wake. */
+void    g4b_rgb_set_gcurrent(uint8_t value);
+uint8_t g4b_rgb_get_gcurrent(void);
+
+/* Global colour balance: per-colour scaling (0x00..0xFF) on the scaling page,
+ * a white/tint trim applied under every effect. Setter is g4b-thread only and is
+ * remembered across the idle rail cycle. Default is 0xFF/0xFF/0xFF (no trim). */
+void g4b_rgb_set_balance(uint8_t r, uint8_t g, uint8_t b);
+void g4b_rgb_get_balance(uint8_t *r, uint8_t *g, uint8_t *b);
+
 #endif /* APEX_G4B_RGB_H */
