@@ -43,6 +43,9 @@ if(CONFIG_APEX_G4B_RADIO_INPUT)
   zephyr_include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../radio/include)
   zephyr_library_sources(src/radio_input_g4b.c ../radio/src/apex_input.c)
 endif()
+if(CONFIG_APEX_RADIO_HOPPING)
+  zephyr_library_sources(../radio/src/apex_hop.c ../radio/src/apex_hop_link.c)
+endif()
 # The `apex` ZMK Studio RPC subsystem (heatmap etc.). Needs ZMK_STUDIO; gated
 # with the shell build for now since it shares the apex_control API. It includes
 # the nanopb-generated proto headers, which land in the app's binary dir (the top

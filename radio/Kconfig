@@ -6,3 +6,12 @@ config APEX_RADIO_TEST_CHANNEL
     help
       Both devices must use the same value. This selects a single frequency
       for development measurements; it does not enable channel hopping.
+
+config APEX_RADIO_HOPPING
+    bool "Experimental timed channel hopping"
+    default n
+    depends on APEX_G4B_RADIO_INPUT || APEX_RECEIVER_RADIO_INPUT
+    help
+      Negotiate a session-bound channel map and hop in 20 ms slots. Owns
+      TIMER2 and PPI channels 17 and 18 after Bluetooth has shut down.
+      Requires matching keyboard and receiver builds. Not a 1 kHz scheduler.

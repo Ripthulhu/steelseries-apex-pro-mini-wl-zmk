@@ -50,7 +50,7 @@ ZMK stays on the keyboard and produces the same reports it uses for USB.
 The input test receiver forwards those reports instead of interpreting physical
 scanner positions or maintaining a second keymap.
 
-Both sides will use a new, versioned protocol and a unique pairing key installed
+Both sides use a new, versioned protocol and a unique pairing key installed
 over USB. Stock firmware and GG compatibility are not goals.
 
 The shared packet implementation currently provides:
@@ -62,11 +62,12 @@ The shared packet implementation currently provides:
 
 The authenticated handshake passes compiled ARM tests, including dropped-message
 retries and rejection of old handshakes without resetting active counters.
-The two devices now use fresh hardware-generated nonces in a live fixed-channel
-test. Encrypted keepalives and replies work at 10 exchanges per second, including
-reconnection after a keyboard restart. The input build adds ordered report
-queues and acknowledgements on a 5 ms send interval. Channel hopping and the
-1 kHz scheduler are not yet implemented.
+The first fixed-channel tests established encrypted communication and then
+keyboard/media input, using fresh hardware-generated nonces. The input builds
+now exchange authenticated traffic across four channels. Their ordered report
+queues use a 5 ms retry interval within the hopping transmit windows; the 1 kHz
+scheduler is unfinished. See [the shared protocol notes](../../radio/README.md)
+for current timing, reconnection results and the unresolved startup timeout.
 
 The first live test detected the expected radio address and packet header but
 failed CRC validation on every packet. Setting `CRCCNF.SKIPADDR` on both radios
@@ -75,9 +76,9 @@ CRC coverage. This is an observed fix; the underlying include-address mismatch
 has not been fully explained.
 
 The receiver uses the Nordic ECB accelerator for AES blocks. The same CCM code
-is checked against independent reference vectors and on the device. Hardware
-AES is currently receiver-only: keyboard integration must first establish
-exclusive peripheral ownership.
+is checked against independent reference vectors and on the device. The keyboard
+also uses hardware AES after Bluetooth shuts down; Bluetooth-mode boots retain
+software AES so the two stacks cannot use the peripheral at the same time.
 
 See [the receiver application](../../dongle/README.md) for the build and shell
 instructions. The keyboard test build retains the v0.1.4 settings and storage

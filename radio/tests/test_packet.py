@@ -20,6 +20,8 @@ KN = bytes(range(16, 32))
 DN = bytes(range(32, 48))
 DERIVED = hmac.digest(KEY, b'apex-radio-v1-session' + KN + DN, 'sha256')
 CTX, PEER, IN, OUT, TYPE, DATA = 0x20001000, 0x20002000, 0x20003000, 0x20004000, 0x20005000, 0x20006000
+HOP_K, HOP_D = 0x20007000, 0x20008000
+LINK_K, LINK_D = 0x20009000, 0x2000a000
 
 
 class PacketTests(unittest.TestCase):
@@ -62,6 +64,251 @@ class PacketTests(unittest.TestCase):
         self.cpu.mem_write(DATA, b'\xa5' * 64)
         self.cpu.mem_write(TYPE, b'\xa5')
         return self.call('apex_packet_decode', receiver, IN, len(packet), TYPE, DATA, 64)
+
+    def hop_init(self):
+        self.handshake()
+        self.assertEqual(self.call('apex_hop_init', HOP_K, CTX), 0)
+        self.assertEqual(self.call('apex_hop_init', HOP_D, PEER), 0)
+
+    def hop_offer(self, channels=(6, 26, 50, 74), generation=1):
+        self.cpu.mem_write(DATA, bytes(channels))
+        n = self.call('apex_hop_offer_map', HOP_K, CTX, DATA, len(channels), generation, OUT, 88)
+        return n, bytes(self.cpu.mem_read(OUT, n)) if n > 0 else b''
+
+    def hop_accept(self, packet):
+        self.cpu.mem_write(IN, packet)
+        return self.call('apex_hop_accept_map', HOP_D, PEER, IN, len(packet))
+
+    def hop_sync(self, now):
+        n = self.call('fixture_hop_sync', HOP_K, CTX, now, OUT, 88)
+        self.assertEqual(n, 36)
+        return bytes(self.cpu.mem_read(OUT, n))
+
+    def hop_receive(self, packet, now):
+        self.cpu.mem_write(IN, packet)
+        return self.call('fixture_hop_receive', HOP_D, PEER, IN, len(packet), now)
+
+    def test_hop_map_authentication_and_replay(self):
+        self.hop_init()
+        n, wire = self.hop_offer()
+        self.assertEqual(n, 34)
+        size = self.call('fixture_hop_size')
+        before = bytes(self.cpu.mem_read(HOP_D, size))
+        for i in range(n):
+            bad = bytearray(wire); bad[i] ^= 1
+            self.assertLess(self.hop_accept(bytes(bad)), 0)
+            self.assertEqual(bytes(self.cpu.mem_read(HOP_D, size)), before)
+        self.assertEqual(self.hop_accept(wire), 0)
+        self.assertEqual(self.hop_accept(wire), -3)
+
+    def test_hop_map_validation_and_ordering(self):
+        self.hop_init()
+        for channels in [(2, 4, 6), (2, 4, 4, 8), (2, 4, 5, 8),
+                         (6, 4, 8, 10), (0, 4, 6, 8), (2, 4, 6, 81), tuple(range(2, 36, 2))]:
+            self.assertEqual(self.hop_offer(channels)[0], -1)
+        self.assertEqual(self.hop_offer(generation=0)[0], -1)
+        _, old = self.hop_offer()
+        _, new = self.hop_offer((8, 28, 52, 76), 2)
+        self.assertEqual(self.hop_accept(new), 0)
+        size = self.call('fixture_hop_size')
+        before = bytes(self.cpu.mem_read(HOP_D, size))
+        self.assertEqual(self.hop_accept(old), -1)
+        self.assertEqual(bytes(self.cpu.mem_read(HOP_D, size)), before)
+        self.assertEqual(self.hop_offer((8, 28, 52, 78), 2)[0], -1)
+        _, retry = self.hop_offer((8, 28, 52, 76), 2)
+        self.assertEqual(self.hop_accept(retry), 0)
+
+    def test_hop_clock_survives_lost_packets(self):
+        self.hop_init()
+        self.assertEqual(self.hop_accept(self.hop_offer()[1]), 0)
+        self.assertEqual(self.call('fixture_hop_begin', HOP_K, 1000, 0, 0), 0)
+        self.assertEqual(self.hop_receive(self.hop_sync(1000), 9000), 0)
+        # Independent local clocks with an 8 ms origin offset. No ACK advances
+        # the schedule; losing four whole slots still yields the same channel.
+        visited = []
+        for elapsed in (0, 19999, 20000, 39999, 40000, 60000, 80000, 99999):
+            k = self.call('fixture_hop_channel', HOP_K, 1000 + elapsed, 0)
+            d = self.call('fixture_hop_channel', HOP_D, 9000 + elapsed, 0)
+            self.assertEqual(k, d)
+            visited.append(k)
+        self.assertEqual(set(visited), {6, 26, 50, 74})
+        self.assertEqual(self.call('fixture_hop_channel', HOP_D, 109000, 0), -6)
+        self.assertEqual(self.hop_receive(self.hop_sync(101000), 109000), -6)
+
+    def test_hop_every_map_size_visits_every_channel(self):
+        for count in range(4, 17):
+            self.hop_init()
+            channels = tuple(range(2, count * 2 + 1, 2))
+            self.assertEqual(self.hop_accept(self.hop_offer(channels)[1]), 0)
+            self.assertEqual(self.call('fixture_hop_begin', HOP_K, 0, 0, 0), 0)
+            seen = set()
+            for slot in range(count * 2):
+                now = slot * 20000
+                self.assertEqual(self.hop_receive(self.hop_sync(now), now), 0)
+                k = self.call('fixture_hop_channel', HOP_K, now, 0)
+                self.assertEqual(k, self.call('fixture_hop_channel', HOP_D, now, 0))
+                seen.add(k)
+            self.assertEqual(seen, set(channels))
+
+    def test_hop_late_sync_cannot_rewind_clock(self):
+        self.hop_init()
+        self.assertEqual(self.hop_accept(self.hop_offer()[1]), 0)
+        self.assertEqual(self.call('fixture_hop_begin', HOP_K, 0, 0, 0), 0)
+        old, new = self.hop_sync(1000), self.hop_sync(21000)
+        self.assertEqual(self.hop_receive(new, 21000), 0)
+        size = self.call('fixture_hop_size')
+        before = bytes(self.cpu.mem_read(HOP_D, size))
+        self.assertEqual(self.hop_receive(old, 22000), -1)
+        self.assertEqual(bytes(self.cpu.mem_read(HOP_D, size)), before)
+        self.assertEqual(self.hop_receive(new, 22000), -3)
+        self.assertEqual(self.hop_offer(generation=2)[0], -5)
+
+    def test_hop_clock_bounds_and_session_binding(self):
+        self.hop_init()
+        self.assertEqual(self.hop_accept(self.hop_offer()[1]), 0)
+        self.assertEqual(self.call('fixture_hop_begin', HOP_D, 0, 0, 0), -5)
+        self.assertEqual(self.call('fixture_hop_begin', HOP_K, 0xfffffff0, 1, 0xffffffff), 0)
+        self.assertGreaterEqual(self.call('fixture_hop_channel', HOP_K, 0x4e0f, 2), 0)
+        self.assertEqual(self.call('fixture_hop_channel', HOP_K, 0x4e10, 2), -4)
+        self.assertEqual(self.call('fixture_hop_channel', HOP_K, 0xffffffff, 0xffffffff), -4)
+        self.cpu.mem_write(IN, bytes(range(64, 80)))
+        self.assertEqual(self.call('apex_connection_start', CTX, IN), 0)
+        self.assertEqual(self.hop_offer(generation=2)[0], -5)
+
+    def test_hop_sync_authentication_and_semantics(self):
+        self.hop_init()
+        self.assertEqual(self.hop_accept(self.hop_offer()[1]), 0)
+        self.assertEqual(self.call('fixture_hop_begin', HOP_K, 0, 0, 0), 0)
+        wire = self.hop_sync(1000)
+        size = self.call('fixture_hop_size')
+        before = bytes(self.cpu.mem_read(HOP_D, size))
+        for i in range(len(wire)):
+            bad = bytearray(wire); bad[i] ^= 1
+            self.assertLess(self.hop_receive(bytes(bad), 1000), 0)
+            self.assertEqual(bytes(self.cpu.mem_read(HOP_D, size)), before)
+        self.assertEqual(self.hop_receive(wire, 1000), 0)
+        before = bytes(self.cpu.mem_read(HOP_D, size))
+        for generation, phase in [(2, 1000), (1, 20000), (1, 65535)]:
+            payload = struct.pack('<BBIIH', 0x48, 1, generation, 0, phase)
+            self.cpu.mem_write(DATA, payload)
+            n = self.call('apex_connection_encode', CTX, 3, DATA, len(payload), OUT, 88)
+            self.assertEqual(self.hop_receive(bytes(self.cpu.mem_read(OUT, n)), 2000), -1)
+            self.assertEqual(bytes(self.cpu.mem_read(HOP_D, size)), before)
+        # A fresh counter does not make a badly delayed clock sample current.
+        self.assertEqual(self.hop_receive(self.hop_sync(2000), 5001), -1)
+        self.assertEqual(bytes(self.cpu.mem_read(HOP_D, size)), before)
+        self.assertEqual(self.hop_receive(self.hop_sync(6000), 6000), 0)
+
+    def test_hop_old_session_schedule_is_not_reused(self):
+        self.hop_init()
+        old = self.hop_offer()[1]
+        self.assertEqual(self.hop_accept(old), 0)
+        for ctx, nonce in [(CTX, bytes(range(64, 80))), (PEER, bytes(range(80, 96)))]:
+            self.cpu.mem_write(IN, nonce)
+            self.assertEqual(self.call('apex_connection_start', ctx, IN), 0)
+        _, challenge = self.handshake_receive(PEER, self.handshake_request(CTX))
+        _, confirm = self.handshake_receive(CTX, challenge)
+        _, ready = self.handshake_receive(PEER, confirm)
+        self.assertEqual(self.handshake_receive(CTX, ready)[0], 0)
+        self.assertEqual(self.hop_accept(old), -5)
+        self.assertEqual(self.hop_offer(generation=2)[0], -5)
+        self.assertEqual(self.call('apex_hop_init', HOP_K, CTX), 0)
+        self.assertEqual(self.call('apex_hop_init', HOP_D, PEER), 0)
+        self.assertLess(self.hop_accept(old), 0)
+        self.assertEqual(self.hop_accept(self.hop_offer()[1]), 0)
+
+    def link_init(self):
+        self.handshake()
+        for link, ctx in ((LINK_K, CTX), (LINK_D, PEER)):
+            self.assertEqual(self.call('apex_hop_link_init', link, ctx, 74), 0)
+
+    def link_next(self, now):
+        n = self.call('fixture_hl_next', LINK_K, CTX, now, OUT, 88)
+        return n, bytes(self.cpu.mem_read(OUT, n)) if n > 0 else b''
+
+    def link_receive(self, link, ctx, wire, now):
+        self.cpu.mem_write(IN, wire)
+        n = self.call('fixture_hl_receive', link, ctx, IN, len(wire), now, OUT, 88)
+        return n, bytes(self.cpu.mem_read(OUT, n)) if n > 0 else b''
+
+    def link_map(self):
+        self.link_init()
+        self.assertEqual(self.link_next(1000)[0], 34)  # First offer lost.
+        _, offer = self.link_next(6000)
+        self.assertEqual(self.link_receive(LINK_D, PEER, offer, 14000)[0], 30)  # ACK lost.
+        _, offer = self.link_next(11000)
+        _, ack = self.link_receive(LINK_D, PEER, offer, 19000)
+        self.assertEqual(self.link_receive(LINK_K, CTX, ack, 12000)[0], 0)
+
+    def test_hop_start_lost_messages_and_blocked_channel(self):
+        self.link_map()
+        seen = set()
+        sync_number = 0
+        dropped = 0
+        for now in range(17000, 412000, 5000):
+            k = self.call('fixture_hl_channel', LINK_K, now)
+            if now >= 112000:
+                self.assertEqual(k, self.call('fixture_hl_channel', LINK_D, now + 8000))
+                seen.add(k)
+            if not self.call('fixture_hl_window', LINK_K, now):
+                continue
+            n, wire = self.link_next(now)
+            self.assertGreaterEqual(n, 0)
+            if not n:
+                continue
+            sync_number += 1
+            if sync_number == 1 or (now >= 112000 and k == 50):
+                dropped += 1
+                continue
+            n, ack = self.link_receive(LINK_D, PEER, wire, now + 8000)
+            self.assertEqual(n, 34)
+            if sync_number != 2:  # First received sync's ACK lost.
+                self.assertEqual(self.link_receive(LINK_K, CTX, ack, now + 1000)[0], 0)
+        self.assertEqual(seen, {6, 26, 50, 74})
+        self.assertGreater(dropped, 1)
+
+    def test_hop_start_no_ack_expires_without_counter_reset(self):
+        self.link_map()
+        previous_counter = 0
+        for now in range(17000, 107001, 5000):
+            n, wire = self.link_next(now)
+            self.assertEqual(n, 36)
+            counter = struct.unpack_from('<I', wire, 4)[0]
+            self.assertGreater(counter, previous_counter)
+            previous_counter = counter
+            self.assertEqual(self.link_receive(LINK_D, PEER, wire, now + 8000)[0], 34)
+        self.assertEqual(self.link_next(112000)[0], -6)
+        self.assertEqual(self.call('fixture_hl_channel', LINK_K, 112000), -6)
+        self.assertEqual(self.call('fixture_hl_channel', LINK_D, 215000), -6)
+
+    def test_hop_discovery_visits_all_channels(self):
+        for role, dwell in ((0, 300000), (1, 40000)):
+            self.assertEqual([self.call('fixture_discovery', role, i * dwell) for i in range(5)],
+                             [74, 6, 50, 26, 74])
+        for offset in (0, 39999, 80000, 159999, 299999):
+            encounters = set()
+            for now in range(0, 1200000, 5000):
+                k = self.call('fixture_discovery', 0, now)
+                d = self.call('fixture_discovery', 1, now + offset)
+                if k == d:
+                    encounters.add(k)
+            self.assertEqual(encounters, {6, 26, 50, 74})
+
+    def test_hop_sync_is_sent_in_each_slot_despite_window_drift(self):
+        self.link_map()
+        _, wire = self.link_next(17000)
+        _, ack = self.link_receive(LINK_D, PEER, wire, 25000)
+        self.assertEqual(self.link_receive(LINK_K, CTX, ack, 18000)[0], 0)
+        # A late clock update in one slot must not suppress the early update
+        # in the next slot, even though fewer than 20 ms have elapsed.
+        for slot in range(1, 12):
+            phase = 14500 if slot % 2 else 5200
+            now = 12000 + slot * 20000 + phase
+            n, wire = self.link_next(now)
+            self.assertEqual(n, 36)
+            n, ack = self.link_receive(LINK_D, PEER, wire, now + 8000)
+            self.assertEqual(n, 34)
+            self.assertEqual(self.link_receive(LINK_K, CTX, ack, now + 1000)[0], 0)
 
     def test_reference_vectors(self):
         for n in (0, 1, 8, 32, 64):
@@ -289,6 +536,8 @@ if __name__ == '__main__':
                '-I' + str(radio / 'include'), '-I' + str(tiny / 'include'),
                str(radio / 'src/apex_packet.c'), str(radio / 'src/apex_connection.c'),
                str(radio / 'src/apex_input.c'),
+               str(radio / 'src/apex_hop.c'),
+               str(radio / 'src/apex_hop_link.c'),
                str(radio / 'tests/packet_fixture.c')]
     command += [str(tiny / 'source' / n) for n in ('aes_encrypt.c', 'ccm_mode.c', 'hmac.c', 'sha256.c', 'utils.c')]
     subprocess.run(command + ['-o', str(binary)], check=True)

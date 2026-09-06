@@ -1,192 +1,177 @@
-# Apex receiver firmware
+# Wireless receiver
 
-This is the custom USB receiver for the first-generation Apex Pro Mini Wireless.
-It currently provides a USB shell, watchdog recovery, USB pairing storage and
-packet crypto tests.
-**It does not receive keyboard input yet.** The keyboard can stay on v0.1.4
-while the receiver is developed.
+Custom receiver firmware for the first-generation SteelSeries Apex Pro Mini
+Wireless. It receives keyboard and media reports from ZMK over an encrypted
+2.4 GHz link and forwards them over USB. The keymap stays on the keyboard.
+It does not use the SteelSeries protocol or pair through GG.
 
-## Build
+This is development firmware. Published keyboard releases do not include this
+radio protocol; both devices need matching builds from this checkout. Gamepad
+output, Studio and wireless updates are not implemented on the receiver.
 
-Use the pinned workspace created by the main project's setup instructions.
-Run these commands on your computer, from the repository directory:
+## Before flashing
 
-```sh
-python tools/build_dongle.py --workspace ../work/zmk-upstream --output ../work/apex-receiver
-```
+The receiver needs our Adafruit-based bootloader, which exposes an
+**APEXDONGLE** USB drive. This is separate from the keyboard's **APEXBOOT** drive.
+Do not use keyboard firmware or the keyboard USB installer on the receiver.
 
-The command prints the artifact directory. It contains the receiver UF2, HEX,
-ELF, exact configuration, source/dependency hashes and build log. It does not
-flash a device. Builds use separate, source-identified artifact directories.
-The receiver uses the keyboard project's Zephyr revision and records the
-workspace's USB-driver patches rather than silently ignoring them.
+Installing the custom receiver bootloader through the stock USB updater worked
+on the development dongle without SWD. That installer and the reviewed
+bootloader build are still local development files, not included in this repo
+or the release downloads. The provisional `bootloader/apex_dongle_wl` files
+are not the installed port. If your dongle still runs stock firmware, stop here;
+the instructions below update an already-converted receiver.
 
-## Flash and open the shell
+## Build both applications
 
-These instructions assume the **custom receiver bootloader is already
-installed**. Do not run the stock keyboard installer against the dongle.
+Follow [Building from source](../docs/BUILDING.md#prepare-the-build-tools) to
+install the pinned workspace. Run these commands on your computer, from the
+repository root. Use `python3` instead of `python` if that is its name on your
+system. The scripts select the workspace's Python environment themselves.
 
-1. Enter the receiver bootloader. From a running receiver shell, use
-   `dongle dfu`. From a hung application, follow the recovery instructions below.
-2. Copy `apex-receiver.uf2` from the printed artifact directory to **APEXDONGLE**.
-   Do not use the keyboard's UF2 file.
-3. Open the receiver's new serial port at 115200 baud. Enable DTR if your serial
-   terminal has that setting. Press Enter to get the `dongle:~$` prompt.
-
-The bootloader uses USB `1d50:6170`; the application uses `1d50:6171`. These are
-local development IDs, not a registered allocation for distribution. The serial
-number stays the same, but the operating system may assign a different port.
-For example, the development receiver uses COM17 in the bootloader and COM18
-in the application. Linux normally exposes these as `/dev/ttyACM*`.
-
-```text
-dongle status       Firmware build, uptime, reset reason and watchdog
-dongle crypto_test  Local encryption/reference/replay checks; no radio traffic
-dongle dfu          Reboot this receiver into APEXDONGLE
-help                Available Zephyr shell commands
-```
-
-The keyboard keeps its existing `apex` commands. A receiver command never
-implicitly resets or changes the keyboard. Remote keyboard commands will use
-an explicit target when that transport is implemented.
-
-## Recover a hung receiver
-
-This requires the recovery bootloader built from reviewed source
-`751c7e74ddd6` or a later compatible version. The initial custom loader
-`4dd61de19ee4` does not have this startup window.
-
-Install pyserial in your Python environment, then run:
+Receiver:
 
 ```sh
-python tools/dongle.py hold-bootloader --timeout 60
+python tools/build_dongle.py --workspace ../work/zmk-upstream --output ../work/apex-receiver --radio-input
 ```
 
-While it waits, unplug and reconnect **the dongle**. The utility opens its serial
-port during the two-second bootloader window and holds it in recovery. It does
-not write flash. APEXDONGLE then remains available for a replacement UF2.
-For multiple receivers, add `--serial SERIAL_NUMBER` before `hold-bootloader`.
+The command prints an artifact directory containing `apex-receiver.uf2`, its
+exact configuration, ELF/HEX files, build log and `build.json` with SHA-256
+hashes. It does not flash anything. Omitting `--radio-input` builds a USB console
+without keyboard input.
 
-A watchdog reset enters recovery automatically. Normal USB enumeration alone
-does not hold the bootloader open. The receiver application also sends fatal
-kernel errors to the bootloader. Its five-second watchdog runs while the CPU
-sleeps; it pauses when halted by a debugger.
-
-## Tests
-
-The host-side packet tests run compiled ARM code and compare it with Python's
-AESCCM implementation. They require `unicorn`, `pyelftools` and `cryptography`:
+Keyboard (one command):
 
 ```sh
-python radio/tests/test_packet.py --workspace ../work/zmk-upstream --output ../work/packet-tests
+python apex-zmk-g4b/build_g4b.py --stage 3 --usb-studio --kscan-ingest --persistent --plain-image --wireless-idle --ab-rollback --shell --extra-conf apex-zmk-g4b/g4b_shell_release.conf --extra-conf apex-zmk-g4b/g4b_radio_input.conf --work-root ../work
 ```
 
-The on-device test measures encryption, decryption and replay checking together.
-It is not a radio latency or battery-life measurement. On the development
-receiver, 100 checks took about 402 ms with software AES and 52 ms with hardware
-AES. The first encrypted packet also matches an independent reference vector.
+Its update file is
+`../work/artifacts-repo-apex-zmk-g4b-wireless-idle-ab-v2/apex-zmk-g4b.plain.uf2`.
+Watchdog and A/B recovery remain enabled. These builds include diagnostic
+shells; they are not a new production release.
 
-## USB pairing development
+## Install the applications
 
-`dongle pair status` shows a public pairing ID and key fingerprint, never the
-key. The host utility transfers the key as a binary record through USB; do not
-type keys into the shell. `dongle pair clear confirm` removes a pairing.
-Pairing occupies the reserved flash pages at `0x6d000..0x74000` and survives
-ordinary application updates.
+1. On the keyboard, hold Fn + Right Ctrl + Esc to open **APEXBOOT**, then copy
+   the keyboard UF2 to it using your file manager. See the
+   [keyboard update guide](../README.md#updating-an-installed-keyboard) for the normal update instructions.
+2. In the receiver's serial shell, enter `dongle dfu`. If the application cannot
+   open a shell, use [recovery](#recover-an-unresponsive-receiver) below.
+3. Copy `apex-receiver.uf2` to **APEXDONGLE** using your file manager. Wait for
+   the copy to finish. The drive disappears when the receiver restarts.
 
-If status reports error `-45`, those pages do not contain a readable NVS store.
-After backing them up, `dongle pair_storage_init confirm` erases only those
-28 KiB and initializes storage. It does not erase a readable store or touch
-the application and bootloader.
+Use the same file-manager copy on Windows, Linux and macOS. Drive letters and
+mount paths vary; identify each drive by its label. Application updates preserve
+the receiver's pairing storage and do not replace its bootloader. Hardware tests
+so far used Windows; Linux and macOS USB operation has not been verified here.
 
-The receiver has passed provisioning, invalid-record rejection, timeout,
-replacement, clear and persistence tests across a UF2 update. Keyboard builds
-with `CONFIG_APEX_G4B_RADIO_PAIRING=y` provide the matching `apex pair` command.
-With both devices connected by USB, use their shell ports:
+## Open a serial shell
+
+Use a serial terminal at 115200 baud with DTR enabled. Press Enter to display
+the prompt: `apex$` for the keyboard or `dongle:~$` for the receiver.
+The keyboard has separate Studio and shell serial ports; use the shell port.
+
+Python's pyserial package also provides a terminal. To keep its dependencies
+separate from your system Python, create a virtual environment:
+
+```sh
+python -m venv .venv
+```
+
+For the commands in the rest of this page, replace `python` with
+`.venv/Scripts/python.exe` on Windows or `.venv/bin/python` on Linux/macOS.
+No shell activation is needed. Install pyserial, list the ports, then open one:
+
+```sh
+python -m pip install pyserial
+python -m serial.tools.list_ports -v
+python -m serial.tools.miniterm PORT 115200
+```
+
+Replace `PORT` with the actual port name: for example `COM5` on Windows,
+`/dev/ttyACM0` on Linux or `/dev/cu.usbmodem...` on macOS. Exit miniterm with
+Ctrl + ]. Close the terminal before running the pairing or recovery utility.
+On Linux, your account needs permission to open the serial device; the group
+used for this is often `dialout`, depending on the distribution.
+
+| Device | USB ID |
+| --- | --- |
+| Keyboard application | `1d50:615e` |
+| Receiver application | `1d50:6171` |
+| Receiver bootloader | `1d50:6170` |
+
+These are local development IDs, not registered allocations for distribution.
+The USB serial number is stable, but the port name can change after an update.
+
+## Pair over USB
+
+Connect both devices by USB and close their serial terminals. Replace the two
+port placeholders with their shell ports:
 
 ```sh
 python tools/dongle.py pair --keyboard-port KEYBOARD_PORT --dongle-port RECEIVER_PORT
 ```
 
-Use `--replace` only to replace an existing pairing. If one device was updated
-before the other disconnected, reconnect both and repeat with `--replace`.
-No key is printed or placed in the shell history. Pairing has been tested on
-both devices and survives a keyboard restart.
+This installs a unique shared key without printing it or placing it in shell
+history. Use `--replace` to replace an existing pairing, or to repeat an
+interrupted pairing that updated only one device. Restart both devices afterward;
+the radio loads its key at startup. Pairing survives normal firmware updates.
 
-## Radio hardware test
+Set the keyboard switch to dongle mode and unplug its USB cable to use the
+receiver. A working keyboard USB connection takes priority. A charge-only
+source leaves the wireless mode selected. Switching between Bluetooth and
+dongle mode restarts the keyboard to hand over the Nordic radio peripheral.
 
-The optional `--radio-probe` receiver build exchanges encrypted test packets
-with a keyboard built using `g4b_radio_probe.conf`. Keep USB connected for
-diagnostics and select the keyboard's dongle position. Switching between
-Bluetooth and dongle restarts the keyboard to change radio ownership.
+## Recover an unresponsive receiver
 
-`apex radio_test` and `dongle radio_test` show the test counters. State 5 means
-the authenticated handshake completed. The `auth` counter counts received
-authenticated test packets; `replay` counts a second local decode correctly
-rejecting each packet. It is not an over-the-air replay injection test.
+The receiver has no button. The reviewed recovery bootloader offers a two-second
+USB window at power-on; the original provisional loader does not support this.
+With pyserial installed, run:
 
-This uses Nordic 2 Mbit mode on 2440 MHz at 10 exchanges per second. The hardware
-CRC covers the packet, excluding the radio address. It has completed a live
-handshake and encrypted round trips between the two boards. It does not carry
-keypresses, use channel hopping or implement the planned idle power policy.
-Restart both devices after changing a pairing; this test loads its key at start.
-Do not use it as a battery-life or 1 kHz latency benchmark.
+```sh
+python tools/dongle.py hold-bootloader --timeout 60
+```
 
-## Still to implement
-
-The production radio scheduler, channel hopping, gamepad forwarding,
-Studio/settings forwarding and wireless keyboard updates.
-The keyboard's current A/B layout has not been migrated.
+While it waits, unplug and reconnect **only the receiver**. The utility holds
+the bootloader open without writing flash. Copy a receiver UF2 to **APEXDONGLE**.
+If several receivers are connected, add `--serial SERIAL_NUMBER` before
+`hold-bootloader` to choose one. Watchdog and fatal application errors also
+return to the bootloader.
 
 ## Keyboard input development
 
-Build the receiver with `--radio-input` and the keyboard with
-`g4b_radio_input.conf`. These are matching development builds, not compatible
-with the older keepalive-only test above. Both devices must already be paired.
+Typing, volume controls, key release after switching off, and reconnection have
+been tested on hardware. Both devices receive authenticated packets on all four
+channels, and typing with keyboard USB disconnected works with hopping enabled.
+The receiver stays connected to USB when the keyboard disconnects and queues
+release reports after a 100 ms link timeout. USB cancellation and host
+suspend/resume handling still need testing.
 
-The keyboard sends ZMK's keyboard and media reports in order. Each report stays
-queued until acknowledged; retries keep the report sequence number but use a
-fresh encrypted packet counter. A new session discards old queued transitions
-and sends the current state. Queue overflow also starts a new session.
-While USB is busy, the receiver replies with the last completed sequence. This
-keeps the radio connection alive without dropping the pending report.
+Reports stay queued until acknowledged after USB submission. Retries use fresh
+encrypted packet counters. A new session discards old transitions and sends the
+current state. Replies carry host lock-key LED state back to ZMK.
 
-Windows recognizes the receiver's keyboard and media interfaces. The first
-empty reports have completed USB submission and been acknowledged over radio.
-Typing through the dongle has been confirmed on hardware with the keyboard's
-USB cable unplugged. Volume controls and release/reconnect after switching off
-while holding a key also passed. Windows captures confirm that direct USB sends
-the correct play/pause and previous/next track reports, although the user's
-playback application did not respond. Host suspend still needs testing.
-Lock-key LED state is included in replies and passed to ZMK's indicator
-handler; this does not add an RGB indication by itself.
+The current schedule uses 20 ms channel slots and a 5 ms input retry interval
+inside guarded transmit windows. It is not the planned 1 kHz scheduler, and
+input latency and battery life have not been measured. An early clock timeout
+recovered automatically but remains unexplained. See the
+[protocol notes](../radio/README.md) for timing, tests and diagnostics.
 
-A working direct USB connection takes priority. Unplug the keyboard's USB cable
-to test input through the dongle. The receiver remains a USB device if the radio
-link disappears and queues release reports after a 100 ms link timeout.
-USB cancellation and suspend/resume handling still need review before this is
-ready for everyday use.
+Useful receiver shell commands:
 
-This version sends every 5 ms on one fixed channel. It is not the planned
-1 kHz implementation or a battery-life benchmark.
-`CONFIG_APEX_RADIO_TEST_CHANNEL` selects the frequency in MHz above 2400 and
-must match on both devices. The input test configurations currently select
-74 (2474 MHz) for comparison with the original 2440 MHz channel. This is a
-development setting, not automatic channel selection.
+```text
+dongle status       Build, uptime, reset reason and watchdog
+dongle radio_test   Connection, timing and delivery counters
+dongle hid_status   USB readiness and report counters
+dongle pair status  Pairing ID and key fingerprint, not the key
+dongle dfu          Restart into APEXDONGLE
+```
 
-Both devices use the Nordic AES peripheral. On the keyboard it is enabled
-only after Bluetooth shuts down; Bluetooth-mode boots retain software AES.
-`radio_test` shows hardware AES and fallback counts, delivered reports, USB
-waits and link timeouts. `dongle hid_status` shows USB readiness, report counts
-and the last nonzero media usage, without exposing typed characters.
-Intermittent link timeouts are still under investigation.
-`TIMEOUT_ACTIVITY` records transmitted packets, CRC-valid received packets,
-CRC errors and rejected packets since the last accepted packet before a
-timeout. These are activity counters, not an over-the-air capture; they cannot
-identify an interfering transmitter. A receiver count of one transmitted
-packet can be the reply to its last accepted packet.
-The receiver can wake its radio thread on packet completion with
-`CONFIG_APEX_RECEIVER_RADIO_EVENT_RX`; the input configuration enables this.
-The keyboard still polls, pending a separate Bluetooth interrupt handover.
-`dongle hid_test_hold` deliberately delays HID submission for 500 ms and
-restarts the radio session. It is a diagnostic command, not a recovery step.
+`dongle hid_test_hold` is a test command: it stalls USB report submission for
+500 ms and restarts the radio session. `dongle crypto_test` checks encryption
+locally. Neither measures end-to-end input latency.
+
+The older `--radio-probe` build is a fixed-channel, keepalive-only experiment.
+It requires `g4b_radio_probe.conf` on the keyboard and does not carry keypresses.
+Do not mix it with the input builds above.

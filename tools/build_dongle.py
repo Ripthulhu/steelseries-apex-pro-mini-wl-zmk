@@ -26,10 +26,18 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--workspace', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
-    parser.add_argument('--radio-probe', action='store_true', help='enable the 10 Hz fixed-channel hardware test')
-    parser.add_argument('--radio-input', action='store_true', help='enable keyboard/media forwarding on the fixed-channel link')
+    variant = parser.add_mutually_exclusive_group()
+    variant.add_argument('--radio-probe', action='store_true', help='enable the 10 Hz fixed-channel hardware test')
+    variant.add_argument('--radio-input', action='store_true', help='enable the keyboard/media receiver with channel hopping')
     args = parser.parse_args()
     workspace, output = args.workspace.resolve(), args.output.resolve()
+    venv = workspace / '.venv'
+    python = venv / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
+    if not python.is_file():
+        raise RuntimeError('Build environment missing; run python tools/setup_workspace.py first')
+    if Path(sys.prefix).resolve() != venv.resolve():
+        # Preserve the venv interpreter path: resolving its symlink loses the environment.
+        return subprocess.call([str(python), str(Path(__file__).resolve()), *sys.argv[1:]])
     lock = json.loads((ROOT / 'dependencies.lock.json').read_text())
     revisions = {'zephyr': lock['repositories']['zephyr']['revision'],
                  'modules/hal/nordic': lock['repositories']['hal_nordic']['revision'],
@@ -108,4 +116,4 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())
