@@ -1,4 +1,14 @@
 # SPDX-License-Identifier: MIT
+config APEX_RADIO_KEYBOARD_EVENT_RX
+    bool "Wake the keyboard radio thread on packet reception"
+    default n
+    depends on APEX_G4B_RADIO_INPUT && APEX_RADIO_HOPPING
+    help
+      Route RADIO END through the PPI channel 17 fork to EGU3. This uses
+      SWI3/EGU3 instead of replacing Bluetooth's direct RADIO interrupt.
+      Enabled only after Bluetooth shutdown; incompatible with another EGU3
+      or nrfx software-interrupt user.
+
 config APEX_RADIO_TEST_CHANNEL
     int "Fixed radio test channel (MHz above 2400)"
     range 0 80

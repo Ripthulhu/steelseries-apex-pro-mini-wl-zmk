@@ -6,7 +6,7 @@
 struct apex_hop_link {
     struct apex_hop clock;
     uint64_t next_sync_slot;
-    uint32_t first_sync, last_sync;
+    uint32_t first_sync, last_sync, acked_sync;
     uint8_t rendezvous, map_acked, sync_acked;
 };
 
@@ -22,5 +22,6 @@ int apex_hop_link_next(struct apex_hop_link *l, struct apex_connection *c,
 int apex_hop_link_channel(const struct apex_hop_link *l, uint64_t now_us);
 bool apex_hop_link_ready(const struct apex_hop_link *l, uint64_t now_us);
 bool apex_hop_link_window(const struct apex_hop_link *l, uint64_t now_us);
+bool apex_hop_link_input_window(const struct apex_hop_link *l, uint64_t now_us);
 uint8_t apex_hop_discovery_channel(enum apex_role role, uint64_t elapsed_us);
 #endif

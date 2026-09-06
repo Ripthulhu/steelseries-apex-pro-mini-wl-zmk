@@ -65,6 +65,7 @@ int apex_hop_link_receive(struct apex_hop_link *l, struct apex_connection *c,
     if (ack[0] == SYNC_ACK && n == 10 && l->first_sync &&
         read32(ack + 6) >= l->first_sync && read32(ack + 6) <= l->last_sync) {
         l->sync_acked = 1;
+        if (read32(ack + 6) > l->acked_sync) l->acked_sync = read32(ack + 6);
         return 0;
     }
     return APEX_PACKET_INVALID;
@@ -120,6 +121,16 @@ bool apex_hop_link_window(const struct apex_hop_link *l, uint64_t now_us)
     if (apex_hop_position(&l->clock, now_us, &slot, &phase)) return false;
     /* Leave room for the 2 ms scheduled TX lead and the receiver's reply. */
     return slot < START_SLOT - 1 || (phase >= 3000 && phase < 13000);
+}
+
+bool apex_hop_link_input_window(const struct apex_hop_link *l, uint64_t now_us)
+{
+    if (!apex_hop_link_ready(l, now_us)) return false;
+    uint32_t slot, phase;
+    if (apex_hop_position(&l->clock, now_us, &slot, &phase)) return false;
+    /* Immediate packets need no scheduled TX lead. Keep 4 ms before hopping
+     * for encryption, airtime and the reply; USB completion may arrive later. */
+    return phase >= 3000 && phase < 16000;
 }
 
 uint8_t apex_hop_discovery_channel(enum apex_role role, uint64_t elapsed_us)

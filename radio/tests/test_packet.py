@@ -310,6 +310,61 @@ class PacketTests(unittest.TestCase):
             self.assertEqual(n, 34)
             self.assertEqual(self.link_receive(LINK_K, CTX, ack, now + 1000)[0], 0)
 
+    def test_input_window_waits_for_start_and_keeps_hop_guards(self):
+        self.link_map()
+        self.assertEqual(self.call('fixture_hl_input_window', LINK_K, 17000), 0)
+        self.assertEqual(self.call('fixture_hl_input_window', LINK_D, 25000), 0)
+        _, wire = self.link_next(17000)
+        _, ack = self.link_receive(LINK_D, PEER, wire, 25000)
+        self.assertEqual(self.link_receive(LINK_K, CTX, ack, 18000)[0], 0)
+        for slot in range(1, 8):
+            now = 12000 + slot * 20000 + 5000
+            _, wire = self.link_next(now)
+            _, ack = self.link_receive(LINK_D, PEER, wire, now + 8000)
+            self.assertEqual(self.link_receive(LINK_K, CTX, ack, now + 1000)[0], 0)
+            for phase in (0, 2999, 3000, 12999, 13000, 15999, 16000, 19999):
+                expected = int(slot >= 5 and 3000 <= phase < 16000)
+                for link, offset in ((LINK_K, 0), (LINK_D, 8000)):
+                    t = 12000 + slot * 20000 + phase + offset
+                    # The receiver cannot extrapolate backwards before its latest sync.
+                    if link == LINK_D and phase < 5000:
+                        continue
+                    self.assertEqual(self.call('fixture_hl_input_window', link, t), expected)
+            if slot >= 5:
+                self.assertEqual(self.call('fixture_hl_window', LINK_K,
+                                          12000 + slot * 20000 + 13000), 0)
+        self.assertEqual(self.call('fixture_hl_input_window', LINK_D, now + 108000), 0)
+
+    def test_clock_ack_progress_requires_new_authenticated_sync(self):
+        self.link_map()
+        self.assertEqual(self.call('fixture_hl_acked_sync', LINK_K), 0)
+        _, wire = self.link_next(17000)
+        counter = struct.unpack_from('<I', wire, 4)[0]
+        _, ack = self.link_receive(LINK_D, PEER, wire, 25000)
+        bad = bytearray(ack)
+        bad[-1] ^= 1
+        self.assertLess(self.link_receive(LINK_K, CTX, bytes(bad), 18000)[0], 0)
+        self.assertEqual(self.call('fixture_hl_acked_sync', LINK_K), 0)
+        self.assertEqual(self.link_receive(LINK_K, CTX, ack, 18000)[0], 0)
+        self.assertEqual(self.call('fixture_hl_acked_sync', LINK_K), counter)
+        self.assertLess(self.link_receive(LINK_K, CTX, ack, 19000)[0], 0)
+        self.assertEqual(self.call('fixture_hl_acked_sync', LINK_K), counter)
+        _, wire = self.link_next(37000)
+        newer = struct.unpack_from('<I', wire, 4)[0]
+        _, ack = self.link_receive(LINK_D, PEER, wire, 45000)
+        self.assertEqual(self.link_receive(LINK_K, CTX, ack, 38000)[0], 0)
+        self.assertGreater(newer, counter)
+        self.assertEqual(self.call('fixture_hl_acked_sync', LINK_K), newer)
+        # A peer may repeat an old ACK in a fresh encrypted packet.
+        for acknowledged in (counter, newer):
+            payload = bytes((0x49, 1)) + struct.pack('<II', 1, acknowledged)
+            self.cpu.mem_write(DATA, payload)
+            n = self.call('apex_connection_encode', PEER, 3, DATA, len(payload), OUT, 88)
+            self.assertGreater(n, 0)
+            repeat = bytes(self.cpu.mem_read(OUT, n))
+            self.assertEqual(self.link_receive(LINK_K, CTX, repeat, 39000)[0], 0)
+            self.assertEqual(self.call('fixture_hl_acked_sync', LINK_K), newer)
+
     def test_reference_vectors(self):
         for n in (0, 1, 8, 32, 64):
             with self.subTest(length=n):

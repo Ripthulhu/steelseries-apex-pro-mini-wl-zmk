@@ -45,7 +45,12 @@ int fixture_hl_window(struct apex_hop_link *l, uint32_t now)
 {
     return apex_hop_link_window(l, now);
 }
+uint32_t fixture_hl_acked_sync(struct apex_hop_link *l) { return l->acked_sync; }
 int fixture_discovery(enum apex_role role, uint32_t elapsed)
 {
     return apex_hop_discovery_channel(role, elapsed);
+}
+int fixture_hl_input_window(struct apex_hop_link *l, uint32_t now)
+{
+    return apex_hop_link_input_window(l, now);
 }

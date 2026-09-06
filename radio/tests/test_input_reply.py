@@ -16,6 +16,7 @@ def main():
     handler = source[start:source.index('\n#endif', start)]
     harness = r'''
 #include "apex_input.h"
+#include "apex_latency.h"
 #include <assert.h>
 #include <errno.h>
 #define APEX_KEYBOARD 0
@@ -25,8 +26,13 @@ def main():
 typedef int k_spinlock_key_t;
 static int local_role = 1, input_lock, input_acked, usb_waits, input_delivered;
 static int duplicate_reports, delivery_result = -EAGAIN;
+static int input_progress;
 static uint32_t pending_usb_sequence, rx_sequence, last_ack;
 static struct apex_input_queue input_queue;
+static struct apex_latency queue_latency;
+static uint32_t queued_at[APEX_INPUT_QUEUE_SIZE];
+static uint32_t k_cycle_get_32(void) { return 100; }
+static uint32_t k_cyc_to_us_floor32(uint32_t cycles) { return cycles; }
 #define atomic_get(p) (*(p))
 #define atomic_set(p,v) (*(p) = (v))
 #define atomic_inc(p) (++*(p))
@@ -65,6 +71,20 @@ int main(void) {
     delivery_result = -EAGAIN;
     assert(input_packet(APEX_PACKET_INPUT, data, n) == 0);
     assert(input_packet(APEX_PACKET_INPUT, data, n) == 6 && last_ack == 1);
+    local_role = APEX_KEYBOARD;
+    apex_input_session(&input_queue);
+    uint8_t ack[6] = {APEX_INPUT_VERSION, 1, 0, 0, 0, 0};
+    assert(input_packet(APEX_PACKET_ACK, ack, sizeof(ack)) == 0);
+    assert(input_progress == 1 && input_acked == 1 && input_queue.count == 1);
+    assert(queue_latency.count == 1 && queue_latency.total_us == 100);
+    input_progress = 0;
+    assert(input_packet(APEX_PACKET_ACK, ack, sizeof(ack)) == 0);
+    assert(input_progress == 0 && input_acked == 1 && input_queue.count == 1);
+    assert(queue_latency.count == 1);
+    queued_at[input_queue.head] = UINT32_MAX - 49;
+    ack[1] = 2;
+    assert(input_packet(APEX_PACKET_ACK, ack, sizeof(ack)) == 0);
+    assert(queue_latency.count == 2 && queue_latency.total_us == 250);
     return 0;
 }
 '''

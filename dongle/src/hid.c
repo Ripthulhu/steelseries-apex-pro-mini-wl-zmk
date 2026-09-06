@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: MIT */
 #include "apex_radio_input.h"
+#include "apex_latency.h"
 #include <string.h>
 #include <zephyr/kernel.h>
 #include <zephyr/usb/class/usbd_hid.h>
@@ -35,6 +36,7 @@ static int64_t hold_until;
 static uint32_t completed[2], releases, submit_errors, transfer_errors;
 static uint16_t last_media_usage;
 static uint32_t submitted_at, delivered_at, usb_max_us;
+static struct apex_latency usb_latency;
 
 uint32_t apex_radio_completed(uint32_t *completed_at)
 {
@@ -79,6 +81,7 @@ static void report_done(const struct device *dev, const uint8_t *data, int statu
         if (pending_sequence) {
             delivered_at = k_cycle_get_32();
             uint32_t elapsed = k_cyc_to_us_floor32(delivered_at - submitted_at);
+            apex_latency_add(&usb_latency, elapsed);
             if (elapsed > usb_max_us) usb_max_us = elapsed;
             notify = true;
             completed[pending_type - 1]++;
@@ -208,6 +211,7 @@ int receiver_hid_status(const struct shell *sh, size_t argc, char **argv)
     uint32_t keys = completed[0], media = completed[1], cleared = releases, errors = submit_errors;
     uint32_t failed = transfer_errors;
     uint32_t usb_us = usb_max_us;
+    struct apex_latency latency = usb_latency;
     uint16_t usage = last_media_usage;
     k_spin_unlock(&lock, key);
     shell_print(sh, "HID ready=%u busy=%u protocol=%u release_pending=%u leds=%02lx",
@@ -217,6 +221,12 @@ int receiver_hid_status(const struct shell *sh, size_t argc, char **argv)
                 (unsigned long)errors, usage);
     shell_print(sh, "HID transfer_errors=%lu", (unsigned long)failed);
     shell_print(sh, "HID submit_to_complete_max_us=%lu", (unsigned long)usb_us);
+    shell_print(sh, "USB_COMPLETE count=%u min_us=%u max_us=%u total_us=%llu",
+                latency.count, latency.min_us, latency.max_us,
+                (unsigned long long)latency.total_us);
+    shell_print(sh, "USB_COMPLETE buckets=%u,%u,%u,%u,%u,%u",
+                latency.buckets[0], latency.buckets[1], latency.buckets[2],
+                latency.buckets[3], latency.buckets[4], latency.buckets[5]);
     return 0;
 }
 

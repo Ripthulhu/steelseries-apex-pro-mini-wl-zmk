@@ -55,15 +55,37 @@ and the acknowledged sync packet's 32-bit counter. Both are authenticated.
 
 TIMER2 and PPI channels 17/18 capture radio END events and schedule clock packets.
 The keyboard sends a clock update in every slot. Initial guard periods leave
-room for transmission and the reply around channel changes. The remaining
-input opportunities still use a 5 ms retry interval, not a 1 kHz schedule.
+room for transmission and the reply around channel changes.
+Clock transmissions may start between 3 and 13 ms into a slot. Once startup
+finishes, ordinary input, keepalives and USB-completion acknowledgements use
+3–16 ms instead: these packets do not need the clock packet's scheduled lead.
+The remaining 4 ms before a hop is a provisional guard, not a measured latency
+guarantee. Late USB completions wait for the next permitted window.
+
+Unacknowledged inputs normally use a 5 ms retry timer. A successful acknowledgement
+lets the next queued report use the next permitted transmit opportunity; it
+does not wait out that retry interval. New input also wakes the radio thread
+when the queue was empty. This is not a 1 kHz schedule.
+After startup, a fresh clock acknowledgement also allows waiting input to
+proceed in the next input window. It does not advance an input sequence or
+change the idle keepalive interval; if the queue head was already sent, it
+allows an earlier retry. `QUEUE clock_ack_advances` counts these
+scheduling decisions. Replayed packets and repeated acknowledgements of the
+same or older clock packet cannot trigger them.
+
+The keyboard's `CONFIG_APEX_RADIO_KEYBOARD_EVENT_RX` routes RADIO END through
+the PPI channel 17 fork to EGU3/SWI3, waking the radio thread without waiting
+for its polling timeout. Bluetooth's direct RADIO interrupt remains untouched;
+the event route is armed only after Bluetooth shutdown. EGU3 must not be used
+by another driver. `RX_WAKE irq_to_thread_max_us` measures ISR-to-thread delay,
+not packet airtime, USB transfer time or physical-key latency.
 
 Receiver USB completion wakes the radio owner thread. A successful report in
 the current session can advance the input acknowledgement without waiting for
 the keyboard to retry it. Failed transfers and old-session completions cannot
 advance it. Lost acknowledgements still recover through ordinary input retries.
-Completion replies obey the same guarded window; this can delay them by about
-10 ms with the current schedule. `ACK completion_to_tx_max_us` measures from
+Completion replies obey the input window; the guard can delay them until the
+next slot. `ACK completion_to_tx_max_us` measures from
 USB completion to the end of the local ACK transmission, not reception by the
 keyboard. USB callbacks do not run encryption or access the radio peripheral.
 
@@ -90,6 +112,21 @@ before reconnecting. Compare both devices' records before calling that an RF
 failure. Rejected traffic can include packets from the session being replaced.
 
 ## Tests
+
+`QUEUE_ACK` in keyboard radio diagnostics measures enqueue-to-acknowledgement
+time for reports that were acknowledged, including queueing, retries, dongle
+USB delivery and the return ACK. It excludes scanner and keymap processing.
+Session-start state reports are included; reports discarded on disconnect or
+overflow are not. Check the overflow and reset counters alongside it.
+
+`USB_COMPLETE` in `dongle hid_status` measures successful USB submissions in the
+current session generation, excluding release reports. Both timing summaries
+accumulate until reboot and print count, minimum, maximum and total microseconds.
+Their six non-cumulative buckets are <=1 ms, >1–2 ms, >2–5 ms, >5–10 ms,
+>10–20 ms and >20 ms. Subtract counts, totals and buckets between snapshots to
+compare a test interval; minimum and maximum remain lifetime values. Counts
+freeze at UINT32_MAX rather than wrap. These counters contain no key values
+and do not measure physical-key-to-application latency or prove 1 kHz cadence.
 
 Run from the repository root with the Python environment used for builds:
 

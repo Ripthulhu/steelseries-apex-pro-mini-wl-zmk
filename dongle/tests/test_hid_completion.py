@@ -18,6 +18,8 @@ def main():
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include "apex_latency.h"
+static struct apex_latency usb_latency;
 #define ARG_UNUSED(x) (void)(x)
 #define APEX_INPUT_CONSUMER 2
 struct device { int unused; };
@@ -72,6 +74,7 @@ int main(void) {
     report_done(0, 0, 0);
     assert(delivered_sequence == 1 && completed[1] == 1 && last_media_usage == 0xcd);
     assert(notifications == 2);
+    assert(usb_latency.count == 2 && usb_latency.total_us == 200);
     return 0;
 }
 '''
@@ -80,6 +83,7 @@ int main(void) {
         (path / 'test.c').write_text(harness + callback + checks)
         binary = path / 'test.exe'
         subprocess.run([args.cc, '-std=c99', '-Wall', '-Wextra', '-Werror',
+                        '-I', str(Path(__file__).resolve().parents[2] / 'radio/include'),
                         str(path / 'test.c'), '-o', str(binary)], check=True)
         subprocess.run([str(binary)], check=True)
     print('HID completion tests passed')
