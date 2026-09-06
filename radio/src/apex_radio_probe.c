@@ -28,6 +28,7 @@ static uint32_t timer_last;
 static atomic_t hop_changes, scan_changes, sync_sent, sync_missed, stamp_error_max;
 static atomic_t hop_live, current_channel, channel_seen;
 static atomic_t hop_rx[4], clock_losses, control_rejected;
+static atomic_t hop_switch_max_us, sync_correction_max_us;
 static atomic_t sync_received, sync_gap_max, control_error, control_error_age;
 static atomic_t control_error_at, clock_loss_age;
 
@@ -339,9 +340,32 @@ static void radio_receive(void)
     receiving = true;
 }
 
+static atomic_t tx_window_deferrals;
+
+static int radio_start_immediate(uint8_t type)
+{
+    unsigned int key = irq_lock();
+#if HOP_ENABLED
+    if (type == APEX_PACKET_INPUT || type == APEX_PACKET_ACK || type == APEX_PACKET_KEEPALIVE) {
+        uint64_t now = radio_time_us();
+        if (!apex_hop_link_input_window(&hop_link, now) ||
+            apex_hop_link_channel(&hop_link, now) != (int)NRF_RADIO->FREQUENCY) {
+            irq_unlock(key);
+            atomic_inc(&tx_window_deferrals);
+            return -EAGAIN;
+        }
+    }
+#else
+    ARG_UNUSED(type);
+#endif
+    NRF_RADIO->TASKS_TXEN = 1;
+    irq_unlock(key);
+    return 0;
+}
+
 static int radio_send(const uint8_t *packet, size_t length, uint64_t scheduled_end_us)
 {
-    if (!length || length > APEX_PACKET_MAX) return -EINVAL;
+    if (length < 2 || length > APEX_PACKET_MAX) return -EINVAL;
     int rc = radio_stop();
     if (rc) return rc;
     dma[0] = length;
@@ -367,7 +391,13 @@ static int radio_send(const uint8_t *packet, size_t length, uint64_t scheduled_e
 #else
     ARG_UNUSED(scheduled_end_us);
 #endif
-    NRF_RADIO->TASKS_TXEN = 1;
+    {
+        rc = radio_start_immediate(packet[1]);
+        if (rc) {
+            radio_receive();
+            return rc;
+        }
+    }
     uint32_t start = k_cycle_get_32();
     while (!NRF_RADIO->EVENTS_DISABLED) {
         if (k_cyc_to_us_floor32(k_cycle_get_32() - start) > (scheduled_end_us ? 5000 : 2000)) {
@@ -563,6 +593,7 @@ static void probe_thread(void *a, void *b, void *c)
                         if (local_role == APEX_RECEIVER && rx[1] == APEX_PACKET_CONTROL) {
                             atomic_inc(&sync_received);
                             if (had_clock) maximum(&sync_gap_max, MIN(age, INT32_MAX));
+                            maximum(&sync_correction_max_us, hop_link.clock.correction_max_us);
                         }
                     } else {
                         atomic_inc(&control_rejected);
@@ -627,6 +658,7 @@ static void probe_thread(void *a, void *b, void *c)
                     }
                     if (n > 0) {
                         rc = radio_send(tx, n, 0);
+                        if (rc == -EAGAIN) goto wait_next;
                         if (rc) goto failed;
                     }
                 } else atomic_inc(&rejected);
@@ -698,6 +730,12 @@ static void probe_thread(void *a, void *b, void *c)
             if (atomic_get(&hop_live)) atomic_inc(&hop_changes);
             else atomic_inc(&scan_changes);
             radio_receive();
+            if (atomic_get(&hop_live)) {
+                uint32_t slot, phase;
+                if (!apex_hop_position(&hop_link.clock, radio_time_us(), &slot, &phase)) {
+                    maximum(&hop_switch_max_us, phase);
+                }
+            }
         }
         if (atomic_get(&hop_live)) {
             const uint8_t map[] = {6, 26, 50, 74};
@@ -722,6 +760,7 @@ static void probe_thread(void *a, void *b, void *c)
                 int n = input_ack(sequence);
                 if (n < 0) { rc = n; goto failed; }
                 rc = radio_send(tx, n, 0);
+                if (rc == -EAGAIN) goto wait_next;
                 if (rc) goto failed;
                 atomic_inc(&completion_acks);
                 maximum(&completion_ack_max_us,
@@ -820,6 +859,8 @@ int apex_radio_probe_status(const struct shell *sh, size_t argc, char **argv)
                 (unsigned long)atomic_get(&channel_seen), (long)atomic_get(&hop_changes),
                 (long)atomic_get(&scan_changes), (long)atomic_get(&sync_sent),
                 (long)atomic_get(&sync_missed), (long)atomic_get(&stamp_error_max));
+    shell_print(sh, "HOP_TIMING switch_phase_max_us=%ld correction_max_us=%ld",
+                (long)atomic_get(&hop_switch_max_us), (long)atomic_get(&sync_correction_max_us));
     shell_print(sh, "HOP_RX c6=%ld c26=%ld c50=%ld c74=%ld clock_lost=%ld control_rejected=%ld",
                 (long)atomic_get(&hop_rx[0]), (long)atomic_get(&hop_rx[1]),
                 (long)atomic_get(&hop_rx[2]), (long)atomic_get(&hop_rx[3]),
@@ -871,6 +912,7 @@ int apex_radio_probe_status(const struct shell *sh, size_t argc, char **argv)
     shell_print(sh, "AES hardware_blocks=%lu software_fallback=%lu",
                 (unsigned long)apex_aes_blocks(), (unsigned long)apex_aes_fallbacks());
 #endif
+    shell_print(sh, "TX window_deferrals=%ld", (long)atomic_get(&tx_window_deferrals));
     shell_print(sh, "APX_RF_TEST role=%u started=%ld state=%ld sessions=%ld tx=%ld rx=%ld auth=%ld replay=%ld rejected=%ld error=%ld",
                 local_role, (long)atomic_get(&running), (long)atomic_get(&state),
                 (long)atomic_get(&sessions), (long)atomic_get(&transmitted),

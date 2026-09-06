@@ -322,8 +322,8 @@ class PacketTests(unittest.TestCase):
             _, wire = self.link_next(now)
             _, ack = self.link_receive(LINK_D, PEER, wire, now + 8000)
             self.assertEqual(self.link_receive(LINK_K, CTX, ack, now + 1000)[0], 0)
-            for phase in (0, 2999, 3000, 12999, 13000, 15999, 16000, 19999):
-                expected = int(slot >= 5 and 3000 <= phase < 16000)
+            for phase in (0, 1999, 2000, 12999, 13000, 17999, 18000, 19999):
+                expected = int(slot >= 5 and 2000 <= phase < 18000)
                 for link, offset in ((LINK_K, 0), (LINK_D, 8000)):
                     t = 12000 + slot * 20000 + phase + offset
                     # The receiver cannot extrapolate backwards before its latest sync.
@@ -364,6 +364,15 @@ class PacketTests(unittest.TestCase):
             repeat = bytes(self.cpu.mem_read(OUT, n))
             self.assertEqual(self.link_receive(LINK_K, CTX, repeat, 39000)[0], 0)
             self.assertEqual(self.call('fixture_hl_acked_sync', LINK_K), newer)
+
+    def test_sync_correction_limit(self):
+        for correction in (-501, -500, 500, 501):
+            self.hop_init()
+            self.assertEqual(self.hop_accept(self.hop_offer()[1]), 0)
+            self.assertEqual(self.call('fixture_hop_begin', HOP_K, 0, 0, 0), 0)
+            self.assertEqual(self.hop_receive(self.hop_sync(1000), 1000), 0)
+            self.assertEqual(self.hop_receive(self.hop_sync(21000), 21000 + correction),
+                             0 if abs(correction) <= 500 else -1)
 
     def test_reference_vectors(self):
         for n in (0, 1, 8, 32, 64):

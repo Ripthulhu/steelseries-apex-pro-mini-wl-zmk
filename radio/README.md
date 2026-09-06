@@ -21,7 +21,7 @@ The schedule follows elapsed time, not successful packets or acknowledgements.
 The keyboard supplies clock updates. A receiver can continue predicting slots
 for less than 100 ms without an update, then returns `APEX_HOP_EXPIRED` so the
 transport can reconnect. Updates cannot rewind advertised slot time, reuse an
-older packet counter, or correct the clock by more than 2 ms. These are initial
+older packet counter, or correct the clock by more than 500 us. These are initial
 test limits. Hardware captures have confirmed successful authenticated traffic
 on all four channels. The scheduled transmit END timestamps matched the Nordic
 timer captures at 1 microsecond resolution; this does not measure input latency.
@@ -54,28 +54,38 @@ generation. Clock acknowledgements use subtype `0x49`, format `1`, generation,
 and the acknowledged sync packet's 32-bit counter. Both are authenticated.
 
 TIMER2 and PPI channels 17/18 capture radio END events and schedule clock packets.
-The keyboard sends a clock update in every slot. Initial guard periods leave
-room for transmission and the reply around channel changes.
+The keyboard sends a clock update in every slot.
 Clock transmissions may start between 3 and 13 ms into a slot. Once startup
 finishes, ordinary input, keepalives and USB-completion acknowledgements use
-3–16 ms instead: these packets do not need the clock packet's scheduled lead.
-The remaining 4 ms before a hop is a provisional guard, not a measured latency
-guarantee. Late USB completions wait for the next permitted window.
+2–18 ms instead: these packets do not need the clock packet's scheduled lead.
+Input traffic pauses for 2 ms on each side of a channel change, giving a
+4 ms gap. These margins still need longer testing. Late USB completions wait
+for the next input window.
+Immediately before starting an input, keepalive or input-ACK transmission,
+the radio owner rechecks the window and selected channel with interrupts
+briefly locked. If it is too late to send, the radio returns to receive mode
+and leaves delivery to the normal retry handling. `TX window_deferrals`
+counts these cases. Each retry uses a fresh encryption counter.
+`HOP_TIMING switch_phase_max_us` records how far into a slot the receive-enable
+request was made after a channel change. It excludes receiver ramp-up.
+`correction_max_us` records the largest accepted clock adjustment. Both are
+lifetime maxima. They help check the timing margins but cannot prove that
+every channel change finished on time.
 
 Unacknowledged inputs normally use a 5 ms retry timer. A successful acknowledgement
-lets the next queued report use the next permitted transmit opportunity; it
-does not wait out that retry interval. New input also wakes the radio thread
+lets the next queued report go out without waiting for that timer.
+New input also wakes the radio thread
 when the queue was empty. This is not a 1 kHz schedule.
 After startup, a fresh clock acknowledgement also allows waiting input to
 proceed in the next input window. It does not advance an input sequence or
-change the idle keepalive interval; if the queue head was already sent, it
-allows an earlier retry. `QUEUE clock_ack_advances` counts these
+change the idle keepalive interval. If the first queued report was already
+sent, it allows an earlier retry. `QUEUE clock_ack_advances` counts these
 scheduling decisions. Replayed packets and repeated acknowledgements of the
 same or older clock packet cannot trigger them.
 
 The keyboard's `CONFIG_APEX_RADIO_KEYBOARD_EVENT_RX` routes RADIO END through
 the PPI channel 17 fork to EGU3/SWI3, waking the radio thread without waiting
-for its polling timeout. Bluetooth's direct RADIO interrupt remains untouched;
+for its polling timeout. Bluetooth's direct RADIO interrupt remains untouched.
 the event route is armed only after Bluetooth shutdown. EGU3 must not be used
 by another driver. `RX_WAKE irq_to_thread_max_us` measures ISR-to-thread delay,
 not packet airtime, USB transfer time or physical-key latency.
@@ -84,7 +94,7 @@ Receiver USB completion wakes the radio owner thread. A successful report in
 the current session can advance the input acknowledgement without waiting for
 the keyboard to retry it. Failed transfers and old-session completions cannot
 advance it. Lost acknowledgements still recover through ordinary input retries.
-Completion replies obey the input window; the guard can delay them until the
+Completion replies use the input window, which can delay them until the
 next slot. `ACK completion_to_tx_max_us` measures from
 USB completion to the end of the local ACK transmission, not reception by the
 keyboard. USB callbacks do not run encryption or access the radio peripheral.
@@ -93,7 +103,7 @@ A lost connection starts a fresh authenticated session. Input queues discard
 old transitions and send the current state. A forced receiver-session reset
 and a 500 ms USB submission stall recovered on hardware. One receiver clock
 timeout shortly after startup also recovered, but its cause is unresolved.
-The user also confirmed typing with keyboard USB disconnected. Longer runs,
+Typing was also tested with keyboard USB disconnected. Longer runs,
 interference, idle power and clock drift still need testing.
 
 ### Reading the diagnostics

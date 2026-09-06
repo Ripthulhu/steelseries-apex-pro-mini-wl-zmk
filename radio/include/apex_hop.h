@@ -7,12 +7,13 @@
 #define APEX_HOP_CHANNELS_MAX 16
 #define APEX_HOP_SLOT_US 20000u
 #define APEX_HOP_HOLDOVER_US 100000u
-#define APEX_HOP_SYNC_SKEW_US 2000u
+#define APEX_HOP_SYNC_SKEW_US 500u
 #define APEX_HOP_EXPIRED (-6)
 
 struct apex_hop {
     uint64_t anchor_us;
     uint32_t generation, anchor_slot, phase_us, sync_counter;
+    uint32_t correction_max_us;
     uint8_t session_id[8], channels[APEX_HOP_CHANNELS_MAX];
     uint8_t count, offset, stride, role, initialized, running;
 };

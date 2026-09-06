@@ -175,6 +175,7 @@ int apex_hop_accept_sync(struct apex_hop *h, struct apex_connection *c,
         uint64_t advertised = (uint64_t)slot * APEX_HOP_SLOT_US + phase;
         uint64_t difference = predicted > advertised ? predicted - advertised : advertised - predicted;
         if (difference > APEX_HOP_SYNC_SKEW_US) return APEX_PACKET_INVALID;
+        if (difference > h->correction_max_us) h->correction_max_us = difference;
     }
     h->anchor_us = local_us;
     h->anchor_slot = slot;
