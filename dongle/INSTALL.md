@@ -60,11 +60,17 @@ is checked; other firmware versions are rejected. Use `--7zip PATH` if 7-Zip
 is not on your command path. Existing backup folders are never overwritten;
 use `--backup another-folder` for another dongle.
 
-Linux needs access to both the stock HID interface and the custom serial port.
-The stock USB IDs are `1038:1624`/`1038:1625`; the custom IDs are
-`1d50:6170` (bootloader) and `1d50:6171` (application). Add an appropriate udev
-rule or grant device access for your account; serial access commonly uses the
-`dialout` group. Do not replace a Windows USB driver with WinUSB: this installer
+On a Linux desktop using systemd, install the included device-access rules
+before flashing, then unplug and reconnect the dongle:
+
+```sh
+sudo install -m 0644 70-apex-dongle.rules /etc/udev/rules.d/70-apex-dongle.rules
+sudo udevadm control --reload-rules
+```
+
+These grant the logged-in desktop user access to the stock HID interface and
+custom serial ports. Headless systems may need group-based permissions instead.
+Do not replace a Windows USB driver with WinUSB: this installer
 uses HID and the standard serial/mass-storage drivers.
 
 ## After installation

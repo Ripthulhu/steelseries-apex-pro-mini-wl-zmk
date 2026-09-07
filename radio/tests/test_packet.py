@@ -5,6 +5,7 @@ pyelftools and cryptography. No keyboard or dongle is accessed.
 """
 import argparse
 import hmac
+import os
 from pathlib import Path
 import struct
 import subprocess
@@ -607,7 +608,7 @@ if __name__ == '__main__':
     radio = Path(__file__).resolve().parents[1]
     tiny = args.workspace.resolve() / 'modules/crypto/tinycrypt/lib'
     sdk = args.workspace.resolve() / '.zephyr-sdk/arm-zephyr-eabi/bin'
-    gcc = next(sdk.glob('arm-zephyr-eabi-gcc*'))
+    gcc = sdk / ('arm-zephyr-eabi-gcc.exe' if os.name == 'nt' else 'arm-zephyr-eabi-gcc')
     args.output.mkdir(parents=True, exist_ok=True)
     binary = args.output.resolve() / 'packet-test.elf'
     command = [str(gcc), '-mcpu=cortex-m4', '-mthumb', '-Os', '-g', '-nostartfiles',

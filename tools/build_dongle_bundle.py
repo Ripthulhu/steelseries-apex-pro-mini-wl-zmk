@@ -76,6 +76,23 @@ def main():
         shutil.copy2(ROOT / 'dongle/installer' / name, bundle / name)
     shutil.copy2(ROOT / 'tools/dongle.py', bundle / 'dongle.py')
     shutil.copy2(ROOT / 'dongle/INSTALL.md', bundle / 'INSTALL.md')
+    shutil.copy2(ROOT / 'dongle/installer/70-apex-dongle.rules', bundle / '70-apex-dongle.rules')
+    licenses = {
+        ROOT / 'LICENSE': 'LICENSE.txt',
+        ROOT / 'THIRD_PARTY_NOTICES.md': 'THIRD_PARTY_NOTICES.txt',
+        workspace / 'zephyr/LICENSE': 'LICENSE-ZEPHYR.txt',
+        workspace / 'modules/lib/picolibc/COPYING.picolibc': 'LICENSE-PICOLIBC.txt',
+        workspace / 'modules/lib/picolibc/COPYING.NEWLIB': 'LICENSE-NEWLIB.txt',
+        source / 'LICENSE': 'LICENSE-ADAFRUIT-BOOTLOADER.txt',
+        source / 'lib/tinyusb/LICENSE': 'LICENSE-TINYUSB.txt',
+        source / 'lib/uf2/LICENSE.txt': 'LICENSE-UF2.txt',
+        source / 'lib/nrfx/LICENSE': 'LICENSE-NRFX.txt',
+        source / 'lib/tinycrypt/LICENSE': 'LICENSE-TINYCRYPT.txt',
+        source / 'lib/softdevice/mbr/hex/mbr_nrf52_2.4.1_licence-agreement.txt': 'LICENSE-NORDIC-MBR.txt',
+        source / 'lib/softdevice/s140_nrf52_7.2.0/s140_nrf52_7.2.0_licence-agreement.txt': 'LICENSE-NORDIC-S140.txt',
+    }
+    for original, name in licenses.items():
+        shutil.copy2(original, bundle / name)
     sums = {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
             for p in sorted(bundle.iterdir()) if p.is_file() and p.name != 'SHA256SUMS.json'}
     (bundle / 'SHA256SUMS.json').write_text(json.dumps(sums, indent=2) + '\n')

@@ -1,0 +1,6 @@
+# Grant the logged-in desktop user access to the stock HID updater.
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1038", ATTRS{idProduct}=="1624", TAG+="uaccess"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1038", ATTRS{idProduct}=="1625", TAG+="uaccess"
+# Custom receiver bootloader and application serial ports.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1d50", ATTRS{idProduct}=="6170", TAG+="uaccess"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1d50", ATTRS{idProduct}=="6171", TAG+="uaccess"
