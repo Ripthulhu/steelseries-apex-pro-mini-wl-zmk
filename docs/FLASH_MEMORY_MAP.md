@@ -40,20 +40,27 @@ UICR boot addresses, reset-pin assignment, and debug settings are documented in
 
 | Range | Size | Contents |
 |---|---:|---|
-| `0x00000..0x60000` | 384 KiB | Stock SteelSeries data and staging area; unused by current firmware |
+| `0x00000..0x60000` | 384 KiB | Incoming application, first extent; stock data before update preparation |
 | `0x60000..0x68000` | 32 KiB | ZMK settings and Bluetooth bonds |
 | `0x68000..0x69000` | 4 KiB | NVS provision marker |
 | `0x69000..0x6A000` | 4 KiB | A/B descriptor |
 | `0x6A000..0x6B000` | 4 KiB | Boot-failure tally |
-| `0x6B000..0x80000` | 84 KiB | Reserved; optional LittleFS development area |
+| `0x6B000..0x77000` | 48 KiB | Reserved LittleFS area |
+| `0x77000..0x80000` | 36 KiB | Incoming application, second extent |
 | `0x80000..0x82000` | 8 KiB | Flash diagnostics |
-| `0x82000..0x8B000` | 36 KiB | Unassigned |
+| `0x82000..0x83000` | 4 KiB | Update journal |
+| `0x83000..0x8B000` | 32 KiB | Incoming application, third extent |
 | `0x8B000..0xFC000` | 452 KiB | A/B recovery image |
 | `0xFC000..0x100000` | 16 KiB | Coredump ring |
 
 The external device stores data only; the nRF cannot execute firmware from it.
 The recovery image has the same 452 KiB limit as the internal application
 partition.
+
+This is layout v3, used by the opt-in [wireless updater](../update/README.md).
+Before preparation, the LittleFS reservation extends to `0x80000` and
+`0x82000..0x8B000` is unassigned. Preparation refuses to reclaim a filesystem
+with unrecognized contents. The settings and fallback addresses are unchanged.
 
 The release verifier checks the internal partition, external A/B slot, linker
 symbols, and bootloader constants together.

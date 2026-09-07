@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: MIT */
 #ifndef APEX_G4B_NOR_LAYOUT_H
 #define APEX_G4B_NOR_LAYOUT_H
+#include "../../update/apex_update_layout.h"
 
 /* Shared layout for app-side raw access to the 1 MiB FM25Q08A.
  * Devicetree owns the two mounted partitions; these constants name the same
@@ -14,13 +15,12 @@
 #define G4B_NOR_NVS_MARK_ADDR       0x068000u
 #define G4B_NOR_AB_HEADER_ADDR      0x069000u
 #define G4B_NOR_AB_TALLY_ADDR       0x06A000u
-#define G4B_NOR_LFS_ADDR            0x06B000u
-#define G4B_NOR_LFS_SIZE            0x015000u
+#define G4B_NOR_LFS_ADDR            APX_UPDATE_LFS_BASE
+#define G4B_NOR_LFS_SIZE            APX_UPDATE_LFS_SIZE
 
 #define G4B_NOR_RAW_TEST_ADDR       0x080000u
 #define G4B_NOR_FLASHDEV_TEST_ADDR  0x081000u
-#define G4B_NOR_FREE_DATA_ADDR      0x082000u
-#define G4B_NOR_FREE_DATA_SIZE      0x009000u
+/* The former free-data area now holds the update journal and candidate tail. */
 
 /* Layout version 2 makes B exactly as large as the internal code partition. */
 #define G4B_NOR_AB_IMAGE_ADDR       0x08B000u

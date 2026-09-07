@@ -1,0 +1,17 @@
+/* SPDX-License-Identifier: MIT */
+#ifndef APEX_UPDATE_LAYOUT_H
+#define APEX_UPDATE_LAYOUT_H
+
+/* Shared with devicetree. Candidate extents do not move NVS or fallback data. */
+#define APX_UPDATE_CAPACITY 0x71000
+#define APX_UPDATE_SECTOR 0x1000
+#define APX_UPDATE_JOURNAL 0x82000
+#define APX_UPDATE_LFS_BASE 0x6b000
+#define APX_UPDATE_LFS_SIZE 0xc000
+#define APX_UPDATE_FIRST_ADDR 0
+#define APX_UPDATE_FIRST_SIZE 0x60000
+#define APX_UPDATE_SECOND_ADDR 0x77000
+#define APX_UPDATE_SECOND_SIZE 0x9000
+#define APX_UPDATE_THIRD_ADDR 0x83000
+#define APX_UPDATE_THIRD_SIZE 0x8000
+#endif

@@ -20,6 +20,7 @@ void g4b_ab_boot_pending(void);
  * unhealthy boots. Latched to run at most once per boot. Costs one 4 KiB NOR
  * erase (~tens of ms, one-shot) on the calling thread. */
 void g4b_ab_mark_healthy(void);
+bool g4b_ab_update_ready(void);
 
 /* Stage image B through updater vendor HID. Commit its descriptor last. */
 bool g4b_ab_stage_erase(void);

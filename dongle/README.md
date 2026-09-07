@@ -255,7 +255,11 @@ dongle radio_test   Connection, timing and delivery counters
 dongle hid_status   USB readiness and report counters
 dongle pair status  Pairing ID and key fingerprint, not the key
 dongle dfu          Restart into APEXDONGLE
+dongle reconnect    Start a fresh encrypted radio session
 ```
+
+For keyboard application updates, see [wireless updates](../update/README.md).
+The keyboard needs one-time wired preparation before it can accept them.
 
 `dongle hid_test_hold` is a test command: it stalls USB report submission for
 500 ms and restarts the radio session. `dongle crypto_test` checks encryption

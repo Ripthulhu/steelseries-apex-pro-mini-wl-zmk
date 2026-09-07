@@ -5,6 +5,9 @@
 #include <zephyr/shell/shell.h>
 #include <zephyr/sys/byteorder.h>
 #include <string.h>
+#if IS_ENABLED(CONFIG_APEX_G4B_WIRELESS_UPDATE)
+#include "update_g4b.h"
+#endif
 
 static shell_transport_handler_t event_handler;
 static void *event_context;
@@ -92,6 +95,23 @@ static int transport_read(const struct shell_transport *iface, void *data,
     uint8_t frame[APEX_STREAM_DATA_MAX];
     int n = apex_shell_read(current, frame);
     if (n <= 0) return 0;
+    if (frame[0] == APEX_UPDATE_DATA) {
+        uint32_t received = 0;
+        int rc = -ENOTSUP;
+        used = 0;
+        command_error = 0;
+#if IS_ENABLED(CONFIG_APEX_G4B_WIRELESS_UPDATE)
+        if (n > 5) {
+            apex_shell_bulk_touch();
+            rc = g4b_update_binary(sys_get_le32(frame + 1), frame + 5, n - 5, &received);
+        }
+#endif
+        uint8_t reply[9] = { APEX_UPDATE_REPLY };
+        sys_put_le32((uint32_t)rc, reply + 1);
+        sys_put_le32(received, reply + 5);
+        (void)apex_shell_send(current, reply, sizeof(reply), k_uptime_get() + 2000);
+        return 0;
+    }
     if (frame[0] != APEX_SHELL_COMMAND && frame[0] != APEX_SHELL_COMMAND_END) return 0;
     if ((size_t)n - 1 >= sizeof(command) - used) command_error = -E2BIG;
     for (int i = 1; i < n && !command_error; i++) {

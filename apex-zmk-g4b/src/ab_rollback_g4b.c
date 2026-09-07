@@ -32,6 +32,9 @@
 
 #include "spinor_g4b.h"
 #include "ab_rollback_g4b.h"
+#if IS_ENABLED(CONFIG_APEX_G4B_WIRELESS_UPDATE)
+#include "update_g4b.h"
+#endif
 #include "nor_layout_g4b.h"
 #include "pins_g4b.h"          /* g4b_attn_isr_fires() for the APXISR line */
 
@@ -40,6 +43,8 @@
 #endif
 
 #define AB_HDR_ADDR    G4B_NOR_AB_HEADER_ADDR
+static atomic_t update_ready;
+bool g4b_ab_update_ready(void) { return atomic_get(&update_ready) != 0; }
 #define AB_TALLY_ADDR  G4B_NOR_AB_TALLY_ADDR
 #define AB_SECTOR      G4B_NOR_SECTOR_SIZE
 #define AB_BIMG_ADDR   G4B_NOR_AB_IMAGE_ADDR
@@ -241,8 +246,20 @@ static bool ab_app_already_b(uint32_t len)
                                   offsetof(struct ab_header, hdr_crc32))) {
         return false;
     }
-    return h.b_base == AB_APP_BASE && h.b_len == len && h.b_crc32 == crc &&
-           h.nor_b_off == AB_BIMG_ADDR && h.flags == AB_FLAG_PROMOTE;
+    if (h.b_base != AB_APP_BASE || h.b_len != len || h.b_crc32 != crc ||
+        h.nor_b_off != AB_BIMG_ADDR || h.flags != AB_FLAG_PROMOTE) return false;
+#if IS_ENABLED(CONFIG_APEX_G4B_WIRELESS_UPDATE)
+    uint8_t buffer[256];
+    uint32_t stored_crc = 0;
+    for (uint32_t offset = 0; offset < len;) {
+        uint32_t n = MIN(sizeof(buffer), len - offset);
+        if (g4b_spinor_dev_read(AB_BIMG_ADDR + offset, buffer, n)) return false;
+        stored_crc = crc32_ieee_update(stored_crc, buffer, n);
+        offset += n;
+    }
+    if (stored_crc != crc) return false;
+#endif
+    return true;
 }
 
 /* Copy the running app into B so the rollback target tracks the firmware that
@@ -261,11 +278,16 @@ static void ab_autostage_thread(void *a, void *b, void *c)
 
     k_sem_take(&ab_autostage_sem, K_FOREVER);
 
+#if IS_ENABLED(CONFIG_APEX_G4B_WIRELESS_UPDATE)
+    if (g4b_update_health()) return;
+#endif
+
     len = ab_app_used_len();
     if (len == 0u || len > AB_APP_MAXLEN) {
         return;
     }
     if (ab_app_already_b(len)) {
+        atomic_set(&update_ready, 1);
         return; /* B already == this firmware; nothing to do */
     }
 
@@ -281,7 +303,7 @@ static void ab_autostage_thread(void *a, void *b, void *c)
         off += n;
         k_yield(); /* let the scanner run freely between chunks */
     }
-    (void)g4b_ab_commit(len);
+    if (g4b_ab_commit(len)) atomic_set(&update_ready, 1);
 }
 
 K_THREAD_DEFINE(g4b_ab_autostage_tid, 2048, ab_autostage_thread, NULL, NULL, NULL,

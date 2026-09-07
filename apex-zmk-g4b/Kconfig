@@ -796,6 +796,17 @@ config APEX_G4B_CHARGE_RESUME_PCT
 	  point would rapid-cycle. 72 gives an ~80/72 hold band; raise toward 75 if
 	  you want it topped up more often, lower it for longer passthrough stretches.
 
+config APEX_G4B_WIRELESS_UPDATE
+	bool "Application updates through the wireless receiver"
+	default n
+	depends on APEX_G4B_SHELL && APEX_G4B_AB_AUTOSTAGE && SETTINGS && APEX_RADIO_SHELL
+	depends on !FILE_SYSTEM_LITTLEFS
+	depends on !APEX_G4B_UPDATER
+	help
+	  Receive a full-size application without overwriting the fallback image.
+	  Requires the matching update bootloader and one-time wired preparation.
+	  Reserves the old LittleFS tail and free NOR space for the candidate image.
+
 config APEX_G4B_AB_ROLLBACK
 	bool "Enable automatic firmware rollback"
 	default n

@@ -1,0 +1,16 @@
+From: Apex ZMK port
+Subject: [PATCH 0009] Include SHA-256 for external application updates
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -184,5 +184,9 @@ if (BOARD STREQUAL "apex_pro_mini_wl")
+   target_sources(bootloader PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src/ab_promote.c)
+   target_compile_definitions(bootloader PUBLIC APEX_ENABLE_AB_ROLLBACK)
++  target_include_directories(bootloader PUBLIC ${TCRYPT_DIR}/include)
++  if (NOT SIGNED_FW)
++    target_sources(bootloader PUBLIC ${TCRYPT_DIR}/source/sha256.c ${TCRYPT_DIR}/source/utils.c)
++  endif ()
+ endif ()
+ 
+ if (SIGNED_FW)

@@ -7,8 +7,8 @@
  * internal flash is erased. A successful copy is verified before the
  * bootloader settings page is cleared.
  *
- * The NOR reader is single-owner and read-only. This module is compiled only
- * when APEX_ENABLE_AB_ROLLBACK is defined.
+ * NOR writes are limited to advancing the wireless-update journal state.
+ * This module is compiled only when APEX_ENABLE_AB_ROLLBACK is defined.
  */
 
 #include <stdint.h>
@@ -20,6 +20,7 @@
 #include "flash_nrf5x.h"
 #include "dfu_types.h"      /* BOOTLOADER_SETTINGS_ADDRESS, CODE_PAGE_SIZE */
 #include "ab_promote.h"
+#include "apex_update.c"
 
 /* NOR layout; keep in sync with src/ab_rollback_g4b.c. */
 #define AB_HDR_ADDR     0x69000u
@@ -173,6 +174,107 @@ static uint32_t crc32_step(uint32_t crc, const uint8_t *p, uint32_t n)
     return ~crc;
 }
 
+static void update_watchdog(void)
+{
+    if (NRF_WDT->RUNSTATUS)
+        for (unsigned int i = 0; i < 8; i++)
+            if (NRF_WDT->RREN & (1u << i)) NRF_WDT->RR[i] = 0x6e524635u;
+}
+
+static int update_nor_read(uint32_t address, void *data, uint32_t length)
+{
+    update_watchdog();
+    return length <= 256 && nor_read(address, data, length) ? 0 : -1;
+}
+
+static bool update_nor_command(uint8_t *bytes, uint32_t length, uint8_t *result)
+{
+    uint8_t response[8];
+    if (length > sizeof(response)) return false;
+    NRF_SPIM0->TXD.PTR = (uint32_t)bytes;
+    NRF_SPIM0->TXD.MAXCNT = length;
+    NRF_SPIM0->RXD.PTR = (uint32_t)response;
+    NRF_SPIM0->RXD.MAXCNT = length;
+    NRF_SPIM0->EVENTS_END = 0;
+    nrf_gpio_pin_clear(NOR_CS);
+    __DSB();
+    NRF_SPIM0->TASKS_START = 1;
+    uint32_t guard = 0x200000;
+    while (!NRF_SPIM0->EVENTS_END && --guard) {}
+    nrf_gpio_pin_set(NOR_CS);
+    __DSB();
+    if (!NRF_SPIM0->EVENTS_END) return false;
+    if (result) *result = response[length - 1];
+    return true;
+}
+
+static int update_nor_wait(void)
+{
+    for (unsigned int i = 0; i < 100000; i++) {
+        uint8_t command[] = { 0x05, 0xff }, status;
+        update_watchdog();
+        if (!update_nor_command(command, sizeof(command), &status)) return -1;
+        if (!(status & 1u)) return 0;
+    }
+    return -1;
+}
+
+static int update_nor_write(uint32_t address, const void *data, uint32_t length)
+{
+    /* The loader only advances the journal state; downloads belong to ZMK. */
+    if (address != APX_UPDATE_JOURNAL + offsetof(struct apx_update_manifest, state) ||
+        length != 4) return -1;
+    uint8_t enable[] = { 0x06 };
+    uint8_t program[8] = { 0x02, address >> 16, address >> 8, address };
+    memcpy(program + 4, data, 4);
+    if (!update_nor_command(enable, sizeof(enable), NULL) ||
+        !update_nor_command(program, sizeof(program), NULL)) return -1;
+    return update_nor_wait();
+}
+
+static int update_app_read(uint32_t address, void *data, uint32_t size)
+{
+    if (address < AB_APP_BASE || address > AB_APP_BASE + AB_APP_MAXLEN ||
+        size > AB_APP_BASE + AB_APP_MAXLEN - address) return -1;
+    memcpy(data, (const void *)address, size);
+    return 0;
+}
+static int update_app_write(uint32_t address, const void *data, uint32_t size)
+{
+    if (address < AB_APP_BASE || address > AB_APP_BASE + AB_APP_MAXLEN ||
+        size > AB_APP_BASE + AB_APP_MAXLEN - address || (size & 3u)) return -1;
+    update_watchdog();
+    flash_nrf5x_write(address, data, size, false);
+    flash_nrf5x_flush(false);
+    return memcmp((const void *)address, data, size) ? -1 : 0;
+}
+static int update_app_erase(uint32_t address, uint32_t size)
+{
+    if (address < AB_APP_BASE || address > AB_APP_BASE + AB_APP_MAXLEN ||
+        size > AB_APP_BASE + AB_APP_MAXLEN - address ||
+        (address & (AB_SECTOR - 1)) || size != AB_SECTOR) return -1;
+    update_watchdog();
+    flash_nrf5x_erase(address, size);
+    return 0;
+}
+static int update_app_finish(void)
+{
+    flash_nrf5x_erase(BOOTLOADER_SETTINGS_ADDRESS, CODE_PAGE_SIZE);
+    flash_nrf5x_flush(false);
+    const uint32_t *settings = (const uint32_t *)BOOTLOADER_SETTINGS_ADDRESS;
+    for (unsigned int i = 0; i < CODE_PAGE_SIZE / sizeof(*settings); i++)
+        if (settings[i] != UINT32_MAX) return -1;
+#if defined(APEX_AB_RESTORED_MAGIC)
+    NRF_POWER->GPREGRET = APEX_AB_RESTORED_MAGIC;
+#endif
+    return 0;
+}
+static const struct apx_update_io update_io = {
+    .nor_read = update_nor_read, .nor_write = update_nor_write,
+    .app_read = update_app_read, .app_write = update_app_write,
+    .app_erase = update_app_erase, .app_finish = update_app_finish,
+};
+
 static bool ab_read_header(struct ab_header *h)
 {
     if (!nor_read(AB_HDR_ADDR, (uint8_t *)h, sizeof(*h))) {
@@ -275,7 +377,17 @@ void ab_promote_check(void)
     boot_status.resetreas = NRF_POWER->RESETREAS;
 
     nor_open();
+    if (update_nor_wait()) {
+        NRF_POWER->GPREGRET = 0x57;
+        nor_close();
+        return;
+    }
     ab_scan_coredumps();
+
+    int update_result = AB_APP_MAXLEN == APX_UPDATE_CAPACITY ? apx_update_install(&update_io) : 0;
+    /* Keep wired recovery selected if a copy failed and fallback is unavailable.
+     * A successful fallback below replaces this with its verified-restore flag. */
+    if (update_result < 0) NRF_POWER->GPREGRET = 0x57;
 
     if (!ab_read_header(&h)) {
         nor_close();
@@ -288,7 +400,7 @@ void ab_promote_check(void)
         nor_close();
         return;
     }
-    if (boot_status.failures < h.fail_thresh) {
+    if (update_result >= 0 && boot_status.failures < h.fail_thresh) {
         boot_status.action = AB_BOOT_WAITING;
         nor_close();
         return; /* Failure threshold has not been reached. */
@@ -316,6 +428,7 @@ void ab_promote_check(void)
      * continue into the normal DFU/application decision instead. */
     if (crc32_step(0u, (const uint8_t *)AB_APP_BASE, h.b_len) == h.b_crc32) {
         boot_status.action = AB_BOOT_CURRENT;
+        if (update_result < 0) NRF_POWER->GPREGRET = 0;
         nor_close();
         return;
     }
@@ -352,6 +465,8 @@ void ab_promote_check(void)
         /* Permit one erased-settings fallback for this verified restore. */
         NRF_POWER->GPREGRET = APEX_AB_RESTORED_MAGIC;
         __DSB();
+#else
+        if (update_result < 0) NRF_POWER->GPREGRET = 0;
 #endif
     }
 }
@@ -402,6 +517,9 @@ void ab_promote_info_append(char *text, uint32_t capacity)
         "recovery image already running", "restore interrupted", "restored"
     };
     uint32_t pos = (uint32_t)strlen(text);
+
+    if (AB_APP_MAXLEN == APX_UPDATE_CAPACITY)
+        text_str(text, capacity, &pos, APX_UPDATE_BOOT_MARKER "\r\n");
 
     text_str(text, capacity, &pos, "Bootloader update: supported\r\nReset: ");
     text_hex32(text, capacity, &pos, boot_status.resetreas);

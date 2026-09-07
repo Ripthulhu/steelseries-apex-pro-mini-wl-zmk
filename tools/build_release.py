@@ -198,6 +198,7 @@ def copy_release_file(source: Path, destination: Path) -> None:
 def recipe_hash() -> str:
     files = sorted(
         [path for path in (ROOT / "bootloader").rglob("*") if path.is_file()]
+        + [ROOT / "update" / name for name in ("apex_update.c", "apex_update.h", "apex_update_layout.h")]
         + [ROOT / "dependencies.lock.json", ROOT / "tools" / "build_release.py"],
         key=lambda path: path.relative_to(ROOT).as_posix(),
     )
@@ -245,6 +246,8 @@ def prepare_bootloader(work_root: Path, cmake: Path, ninja: Path,
         for name in ("ab_promote.c", "ab_promote.h"):
             shutil.copy2(ROOT / "bootloader" / "apex_pro_mini_wl" / name,
                          source / "src" / name)
+        for name in ("apex_update.c", "apex_update.h", "apex_update_layout.h"):
+            shutil.copy2(ROOT / "update" / name, source / "src" / name)
         shutil.copy2(
             ROOT / "bootloader" / "apex_pro_mini_wl" / "nrf52833_apex_legacy.ld",
             source / "linker" / "nrf52833_apex_legacy.ld",
@@ -438,6 +441,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--work-root", type=Path)
     parser.add_argument("--skip-bootloader", action="store_true")
+    parser.add_argument("--bootloader-only", action="store_true",
+                        help="build the normal keyboard bootloader without rebuilding the application")
     parser.add_argument(
         "--installer-bootloader",
         action="store_true",
@@ -469,6 +474,13 @@ def main() -> int:
     sdk = upstream / ".zephyr-sdk"
     run([python, ROOT / "tools" / "verify_release.py", "--work-root", work_root,
          "--dependencies-only"])
+    if args.bootloader_only:
+        if args.skip_bootloader or args.installer_bootloader or args.extra_conf:
+            fail("--bootloader-only cannot be combined with other build options")
+        boot_build = prepare_bootloader(work_root, cmake, ninja, python, sdk)
+        print(f"Keyboard bootloader: {boot_build / 'bootloader_mbr.uf2'}")
+        print("Bootloader built. Nothing was flashed.")
+        return 0
     if args.installer_bootloader:
         if args.skip_bootloader or args.extra_conf:
             fail("--installer-bootloader cannot be combined with application build options")

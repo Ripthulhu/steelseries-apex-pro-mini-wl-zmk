@@ -5,6 +5,9 @@
  * Compiled only when CONFIG_APEX_G4B_SHELL.
  */
 #include <zephyr/shell/shell.h>
+#if IS_ENABLED(CONFIG_APEX_G4B_WIRELESS_UPDATE)
+#include "update_g4b.h"
+#endif
 #if IS_ENABLED(CONFIG_APEX_G4B_RADIO_PAIRING)
 #include "apex_pair.h"
 #endif
@@ -1206,6 +1209,10 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
               "Usage: apex mon [count] [seconds]   (default 20 @ 1 s; "
               "blocks the shell until it finishes).",
               cmd_mon),
+#if IS_ENABLED(CONFIG_APEX_G4B_WIRELESS_UPDATE)
+    SHELL_CMD_ARG(update, NULL, "Wireless application update: status, prepare, begin, write, commit, reboot.",
+                  g4b_update_command, 1, 3),
+#endif
     SHELL_CMD(battery, NULL,
               "Battery status.\n"
               "Usage: apex battery\n"

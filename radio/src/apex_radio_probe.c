@@ -246,7 +246,7 @@ static bool gamepad_fresh;
 static uint32_t gamepad_sample_at;
 static uint32_t gamepad_rx_counter;
 #if IS_ENABLED(CONFIG_APEX_RADIO_SHELL)
-static uint32_t shell_poll_at;
+static uint32_t shell_poll_at, bulk_gamepad_at;
 #endif
 
 bool apex_radio_input_selected(void) { return atomic_get(&input_selected) != 0; }
@@ -1306,7 +1306,10 @@ static void probe_thread(void *a, void *b, void *c)
                     k_spin_unlock(&input_lock, key);
                     length = APEX_GAMEPAD_PAYLOAD_SIZE;
 #if IS_ENABLED(CONFIG_APEX_RADIO_SHELL)
-                    if (k_uptime_get_32() - shell_poll_at >= 10) {
+                    bool bulk = apex_shell_bulk_active();
+                    bool gamepad_due = bulk && payload[1] && k_uptime_get_32() - bulk_gamepad_at >= 10;
+                    if (gamepad_due) bulk_gamepad_at = k_uptime_get_32();
+                    if (!gamepad_due && k_uptime_get_32() - shell_poll_at >= (bulk ? 1u : 10u)) {
                         shell_poll_at = k_uptime_get_32();
                         length = apex_shell_link_pack(payload);
                         packet_type = APEX_PACKET_SHELL;
@@ -1358,6 +1361,9 @@ transmit:
 #endif
             }
             uint32_t retry_us = INPUT_ENABLED ? 5000 : 100000;
+#if IS_ENABLED(CONFIG_APEX_RADIO_SHELL)
+            if (apex_shell_bulk_active()) retry_us = 1000;
+#endif
 #if INPUT_ENABLED
             k_spinlock_key_t pending_key = k_spin_lock(&input_lock);
             if (input_queue.count) retry_us = 1500;

@@ -10,6 +10,7 @@
  * builds select the external-NOR settings partition through /chosen.
  */
 
+#include "../update/apex_update_layout.h"
 /delete-node/ &storage_partition;
 
 /* The production board has the nRF52833 DC/DC inductor populated: stock was
@@ -55,17 +56,19 @@
      * dangling flash-map reference (a stray node with no compiled driver breaks
      * the link with __device_dts_ord_NN undefined).
      *
-     * Layout on the chip (proven free by the G4B-4 survey; clear of the legacy
-     * staged-firmware region 0x14000-0x5F000):
+     * External layout v3 (candidate regions are used only after wired preparation):
+     *   0x00000  0x60000  incoming application, first extent
      *   0x60000  0x8000   ext_storage_partition - ZMK NVS (8 x 4 KiB sectors)
      *   0x68000  0x1000   provision marker sector (see NVS_PROVISION in
      *                      flash_spinor_g4b.c) - not a DT partition, addressed raw
      *   0x69000  0x1000   A/B descriptor (raw, committed last)
      *   0x6a000  0x1000   A/B boot-health tally (raw, append-only)
-     *   0x6b000  0x15000  littlefs_partition - LittleFS substrate
+     *   0x6b000  0xc000   littlefs_partition - reserved, not mounted
+     *   0x77000  0x9000   incoming application, second extent
      *   0x80000  0x1000   raw-SPIM diagnostic scratch
      *   0x81000  0x1000   flash-device diagnostic scratch
-     *   0x82000  0x9000   reserved/free data space
+     *   0x82000  0x1000   update journal
+     *   0x83000  0x8000   incoming application, third extent
      *   0x8b000  0x71000  A/B image B (full internal app-slot capacity)
      *   0xfc000  0x4000   coredump ring
      * The NVS partition is one-time formatted to 0xFF on first boot because the
@@ -91,17 +94,11 @@
                 reg = <0x60000 0x8000>;
             };
 
-            /* Space reserved for the optional LittleFS development feature.
-             * It sits above NVS (ends 0x68000),
-             * the raw provision marker (0x68000), and the A/B descriptor+tally
-             * raw sectors (0x69000, 0x6a000); 0x15000 = 21 x 4 KiB, ending at
-             * 0x80000, immediately BELOW the write-test scratch sector so the two
-             * never overlap. The coredump ring sits far above at 0xFC000 and the
-             * A/B image-B stage at 0x8B000, both clear of this. verify_g4b.py
-             * pins this placement (floor >= 0x6b000, ceiling <= 0x80000). */
+            /* Reserved filesystem space. Wireless update preparation refuses
+             * to shrink a device with data in its old 84 KiB reservation. */
             littlefs_partition: partition@6b000 {
                 label = "lfs";
-                reg = <0x6b000 0x15000>;
+                reg = <APX_UPDATE_LFS_BASE APX_UPDATE_LFS_SIZE>;
             };
         };
     };

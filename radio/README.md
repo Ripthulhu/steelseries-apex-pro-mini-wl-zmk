@@ -7,6 +7,10 @@ firmware; the 1 kHz input scheduler and wireless power measurements are unfinish
 
 ## Remote shell
 
+The opt-in [wireless updater](../update/README.md) uses this transport to stage
+keyboard application images. It requires a one-time wired bootloader and storage
+setup; ordinary shell access does not change the flash layout.
+
 Packet type 8 carries commands and output through the authenticated radio
 session. The keyboard polls in otherwise-unused input slots, no more often than
 every 10 ms. Keyboard and media reports take priority. The receiver replies

@@ -2160,6 +2160,10 @@ static void s3_sleep_maybe(void)
     extern bool g4b_radio_shell_busy(void);
     if (g4b_radio_shell_busy()) return;
 #endif
+#if IS_ENABLED(CONFIG_APEX_G4B_WIRELESS_UPDATE)
+    extern bool g4b_update_busy(void);
+    if (g4b_update_busy()) return;
+#endif
 
     if (s3_sleep_failed || s3_gamepad_streaming()) {
         return;

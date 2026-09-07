@@ -145,10 +145,30 @@ def main():
     pair.add_argument('--keyboard-port', required=True)
     pair.add_argument('--dongle-port', required=True)
     pair.add_argument('--replace', action='store_true', help='replace an existing pairing on either device')
+    update = commands.add_parser('update', help='send a keyboard application through the receiver')
+    update.add_argument('--dongle-port', required=True)
+    update.add_argument('file', help='update-capable keyboard UF2')
+    update.add_argument('--install', action='store_true', help='verify, install and restart after downloading')
+    update.add_argument('--resume', action='store_true', help='continue a matching download if the keyboard has not restarted')
+    backup = commands.add_parser('backup', help='back up keyboard flash over its own USB shell')
+    backup.add_argument('--keyboard-port', required=True)
+    backup.add_argument('--output', required=True, help='new private backup directory')
     args = parser.parse_args()
     if args.command == 'list':
         for p in bootloader_ports(args.serial):
             print(p.device, p.serial_number)
+    elif args.command == 'backup':
+        from keyboard_backup import backup_keyboard
+        try:
+            backup_keyboard(args.keyboard_port, args.output)
+        except (OSError, ValueError, RuntimeError, serial.SerialException) as exc:
+            parser.exit(1, str(exc) + '\n')
+    elif args.command == 'update':
+        from wireless_update import update_keyboard
+        try:
+            update_keyboard(args.dongle_port, args.file, install=args.install, resume=args.resume)
+        except (OSError, ValueError, RuntimeError, serial.SerialException) as exc:
+            parser.exit(1, str(exc) + '\n')
     elif args.command == 'pair':
         try:
             pair_devices(args.keyboard_port, args.dongle_port, args.replace)

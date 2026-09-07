@@ -23,6 +23,7 @@ class ShellTests(unittest.TestCase):
         self.commands = []
         self.replies = []
         self.result = 0
+        self.writes = []
         self.cpu.hook_add(UC_HOOK_CODE, self.hook)
 
     def hook(self, cpu, address, size, user):
@@ -49,11 +50,17 @@ class ShellTests(unittest.TestCase):
             value = self.result
         elif name == 'z_impl_k_uptime_ticks':
             cpu.reg_write(UC_ARM_REG_R1, 0)
+        elif name == 'g4b_update_binary':
+            offset = cpu.reg_read(UC_ARM_REG_R0)
+            length = cpu.reg_read(UC_ARM_REG_R2)
+            self.writes.append((offset, bytes(cpu.mem_read(cpu.reg_read(UC_ARM_REG_R1), length))))
+            cpu.mem_write(cpu.reg_read(UC_ARM_REG_R3), struct.pack('<I', offset + length))
+            value = self.result
         cpu.reg_write(UC_ARM_REG_R0, value & 0xffffffff)
         cpu.reg_write(UC_ARM_REG_PC, cpu.reg_read(UC_ARM_REG_LR))
 
-    def feed(self, data, final=True):
-        self.pending.append(bytes([2 if final else 1]) + data)
+    def feed(self, data, final=True, kind=None):
+        self.pending.append(bytes([kind if kind is not None else 2 if final else 1]) + data)
         for reg, value in zip((UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2, UC_ARM_REG_R3), (0, 0, 0, COUNT)):
             self.cpu.reg_write(reg, value)
         self.cpu.reg_write(UC_ARM_REG_SP, 0x2001e000)
@@ -92,6 +99,22 @@ class ShellTests(unittest.TestCase):
         self.assertEqual(self.commands, [])
         self.assertTrue(all(struct.unpack('<i', reply[1:])[0] < 0 for reply in self.replies))
 
+    def test_binary_write_returns_position_and_error(self):
+        if 'g4b_update_binary' not in SYMBOLS:
+            self.skipTest('Update support is disabled')
+        self.feed(struct.pack('<I', 32) + b'x' * 32, kind=5)
+        self.assertEqual(self.writes, [(32, b'x' * 32)])
+        self.assertEqual(self.replies[-1], b'\x06' + struct.pack('<iI', 0, 64))
+        self.result = -11
+        self.feed(struct.pack('<I', 64) + b'y' * 32, kind=5)
+        self.assertEqual(self.replies[-1], b'\x06' + struct.pack('<iI', -11, 96))
+        self.assertEqual(self.commands, [])
+
+    def test_empty_binary_write_is_rejected(self):
+        self.feed(struct.pack('<I', 0), kind=5)
+        self.assertEqual(self.writes, [])
+        self.assertLess(struct.unpack_from('<i', self.replies[-1], 1)[0], 0)
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
@@ -104,4 +127,7 @@ if __name__ == '__main__':
                     if s['p_type'] == 'PT_LOAD' and s['p_filesz']]
     HOOKS = {SYMBOLS[name] & ~1: name for name in ('apex_shell_generation', 'apex_shell_read',
              'apex_shell_send', 'shell_execute_cmd', 'z_impl_k_uptime_ticks')}
+    for name in ('g4b_update_binary', 'apex_shell_bulk_touch'):
+        if name in SYMBOLS:
+            HOOKS[SYMBOLS[name] & ~1] = name
     unittest.main(argv=['radio-shell-tests'], verbosity=2)

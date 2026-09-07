@@ -29,7 +29,7 @@ jobs:
         run: python tools/build_dongle_bundle.py --workspace "$WORK_ROOT/zmk-upstream" --output "$WORK_ROOT/dongle"
       - name: Test bootloader and installer ARM code
         run: |
-          "$WORK_ROOT/zmk-upstream/.venv/bin/python" -m pip install unicorn==2.1.4 cryptography
+          "$WORK_ROOT/zmk-upstream/.venv/bin/python" -m pip install unicorn==2.1.4 cryptography pyserial
           "$WORK_ROOT/zmk-upstream/.venv/bin/python" dongle/bootloader/test_bootloader_arm.py "$WORK_ROOT/dongle/apex-dongle"
           "$WORK_ROOT/zmk-upstream/.venv/bin/python" dongle/installer/test_migration_arm.py "$WORK_ROOT/dongle/apex-dongle"
           "$WORK_ROOT/zmk-upstream/.venv/bin/python" dongle/installer/test_migration_arm.py "$WORK_ROOT/dongle/apex-dongle" readback
@@ -41,14 +41,26 @@ jobs:
         run: >-
           "$WORK_ROOT/zmk-upstream/.venv/bin/python" dongle/tests/test_keyboard_shell.py
           --elf "$WORK_ROOT/dongle/apex-dongle/apex-receiver.elf"
+      - name: Test receiver binary update parser
+        run: >-
+          "$WORK_ROOT/zmk-upstream/.venv/bin/python" dongle/tests/test_update.py
+          "$WORK_ROOT/dongle/apex-dongle/apex-receiver.elf"
       - name: Build matching keyboard firmware
         run: >-
           python apex-zmk-g4b/build_g4b.py --stage 3 --usb-studio --kscan-ingest
           --persistent --plain-image --wireless-idle --ab-rollback --shell
           --extra-conf apex-zmk-g4b/g4b_shell_release.conf
           --extra-conf apex-zmk-g4b/g4b_radio_input.conf --work-root "$WORK_ROOT"
+      - name: Build and test keyboard update bootloader
+        run: |
+          python tools/build_release.py --work-root "$WORK_ROOT" --bootloader-only
+          "$WORK_ROOT/zmk-upstream/.venv/bin/python" update/test_bootloader.py "$WORK_ROOT"/release-deps/adafruit-boot-*/_build_apex_release/bootloader.elf
       - name: Test radio protocol
         run: '"$WORK_ROOT/zmk-upstream/.venv/bin/python" radio/tests/test_packet.py --workspace "$WORK_ROOT/zmk-upstream" --output "$WORK_ROOT/radio-tests"'
+      - name: Test wireless update engine and image validation
+        run: |
+          python update/test_update.py --tinycrypt "$WORK_ROOT/zmk-upstream/modules/crypto/tinycrypt/lib"
+          "$WORK_ROOT/zmk-upstream/.venv/bin/python" tools/test_wireless_update.py
       - name: Test compiled NOR read loop
         run: >-
           "$WORK_ROOT/zmk-upstream/.venv/bin/python" apex-zmk-g4b/test_spinor_read.py
@@ -68,4 +80,12 @@ jobs:
         with:
           name: apex-keyboard-radio
           path: /tmp/apex-radio-work/artifacts-repo-apex-zmk-g4b-wireless-idle-ab-v2/*
+          if-no-files-found: error
+      - name: Upload keyboard update bootloader
+        uses: actions/upload-artifact@v4
+        with:
+          name: experimental-keyboard-update-bootloader
+          path: |
+            /tmp/apex-radio-work/release-deps/adafruit-boot-*/_build_apex_release/bootloader_mbr.uf2
+            /tmp/apex-radio-work/release-deps/adafruit-boot-*/_build_apex_release/bootloader.elf
           if-no-files-found: error

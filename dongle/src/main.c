@@ -13,8 +13,10 @@
 int receiver_usb_init(void);
 #if IS_ENABLED(CONFIG_APEX_RADIO_SHELL)
 int receiver_keyboard_command(const struct shell *sh, size_t argc, char **argv);
+int receiver_update_start(const struct shell *sh, size_t argc, char **argv);
 #endif
 #if IS_ENABLED(CONFIG_APEX_RECEIVER_RADIO_INPUT)
+#include "apex_radio_input.h"
 int receiver_hid_init(void);
 int receiver_hid_benchmark(const struct shell *sh, size_t argc, char **argv);
 void receiver_hid_poll(void);
@@ -75,11 +77,25 @@ static int cmd_dfu(const struct shell *sh, size_t argc, char **argv)
     return 0;
 }
 
+#if IS_ENABLED(CONFIG_APEX_RECEIVER_RADIO_INPUT)
+static int cmd_reconnect(const struct shell *sh, size_t argc, char **argv)
+{
+    ARG_UNUSED(argc); ARG_UNUSED(argv);
+    apex_radio_request_session();
+    shell_print(sh, "Radio session restarting.");
+    return 0;
+}
+#endif
+
 SHELL_STATIC_SUBCMD_SET_CREATE(dongle_commands,
+#if IS_ENABLED(CONFIG_APEX_RADIO_SHELL)
+    SHELL_CMD_ARG(upload, NULL, "Binary keyboard update transfer; used by tools/dongle.py.", receiver_update_start, 1, 0),
+#endif
 #if IS_ENABLED(CONFIG_APEX_RECEIVER_RADIO_PROBE)
     SHELL_CMD_ARG(radio_test, NULL, "Radio connection and delivery counters.", apex_radio_probe_status, 1, 0),
 #endif
 #if IS_ENABLED(CONFIG_APEX_RECEIVER_RADIO_INPUT)
+    SHELL_CMD_ARG(reconnect, NULL, "Start a fresh radio session without changing pairing.", cmd_reconnect, 1, 0),
     SHELL_CMD_ARG(hid_status, NULL, "USB HID state and media report counters.", receiver_hid_status, 1, 0),
     SHELL_CMD_ARG(hid_bench, NULL, "Pause radio and send 1000 empty USB reports.", receiver_hid_benchmark, 1, 0),
     SHELL_CMD_ARG(hid_test_hold, NULL, "Delay HID for 500 ms and restart the radio session.", receiver_hid_test_hold, 1, 0),
