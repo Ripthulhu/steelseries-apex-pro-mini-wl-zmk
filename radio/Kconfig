@@ -1,10 +1,28 @@
 # SPDX-License-Identifier: MIT
+config APEX_RADIO_THREAD_PRIORITY
+    int "Radio transaction thread priority"
+    range 0 14
+    default 0
+    help
+      Preemptible Zephyr priority for authenticated packet processing. Lower
+      values run first. USB interrupts and cooperative workqueues still take
+      precedence. The thread blocks while transmitting or waiting for traffic.
+
+config APEX_RADIO_BENCHMARK
+    bool "Enable the bounded radio delivery benchmark"
+    default n
+    depends on APEX_G4B_RADIO_INPUT && SHELL
+    help
+      Add apex radio_bench to send 1000 empty keyboard reports through the
+      normal radio and receiver USB path. Requires direct USB output and
+      stops after ten seconds or an endpoint/session change. Development only.
+
 config APEX_RADIO_KEYBOARD_EVENT_RX
     bool "Wake the keyboard radio thread on packet reception"
     default n
     depends on APEX_G4B_RADIO_INPUT && APEX_RADIO_HOPPING
     help
-      Route RADIO END through the PPI channel 17 fork to EGU3. This uses
+      Route RADIO DISABLED through PPI channel 19 to EGU3. This uses
       SWI3/EGU3 instead of replacing Bluetooth's direct RADIO interrupt.
       Enabled only after Bluetooth shutdown; incompatible with another EGU3
       or nrfx software-interrupt user.
@@ -23,5 +41,5 @@ config APEX_RADIO_HOPPING
     depends on APEX_G4B_RADIO_INPUT || APEX_RECEIVER_RADIO_INPUT
     help
       Negotiate a session-bound channel map and hop in 20 ms slots. Owns
-      TIMER2 and PPI channels 17 and 18 after Bluetooth has shut down.
+      TIMER2 and PPI channels 17, 18 and 19 after Bluetooth has shut down.
       Requires matching keyboard and receiver builds. Not a 1 kHz scheduler.

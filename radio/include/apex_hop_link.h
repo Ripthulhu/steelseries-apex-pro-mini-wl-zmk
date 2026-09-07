@@ -3,6 +3,10 @@
 #define APEX_HOP_LINK_H
 #include "apex_hop.h"
 
+#define APEX_INPUT_OPEN_US 750u
+#define APEX_INPUT_CLOSE_US 18500u
+#define APEX_REPLY_CLOSE_US 19500u
+
 struct apex_hop_link {
     struct apex_hop clock;
     uint64_t next_sync_slot;
@@ -23,5 +27,6 @@ int apex_hop_link_channel(const struct apex_hop_link *l, uint64_t now_us);
 bool apex_hop_link_ready(const struct apex_hop_link *l, uint64_t now_us);
 bool apex_hop_link_window(const struct apex_hop_link *l, uint64_t now_us);
 bool apex_hop_link_input_window(const struct apex_hop_link *l, uint64_t now_us);
+bool apex_hop_link_reply_window(const struct apex_hop_link *l, uint64_t now_us);
 uint8_t apex_hop_discovery_channel(enum apex_role role, uint64_t elapsed_us);
 #endif

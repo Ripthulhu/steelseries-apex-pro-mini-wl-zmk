@@ -99,6 +99,7 @@
   },
   "zmk_module_list": "apex-zmk-g4b/modules.txt",
   "patches": {
+    "dongle/bootloader/port.patch": "f9e69dd276be86c7c7ca1ddb14b2df8220bd295d57de91cc5c2484c09921d816",
     "apex-zmk-g4b/patches/0006-hid-input-completion-status.patch": "fff7739176150d8816cb6920f9f595cc64b80d57842f801ce2592c267293a236",
     "apex-zmk-g4b/patches/0005-custom-radio-endpoint.patch": "6004b0f6a9ceed7dcf07c6d5278033a8ff0de42a6ce28ff9630139d12d076c0c",
     "apex-zmk-g4b/patches-messages/0001-apex-rpc-subsystem-proto.patch": "d44bdb9bfb4b4d87d9a7f9ea357b5d5eb4c1636f993e28ed3ac0971bce86cff6",

@@ -36,6 +36,18 @@ jobs:
       - name: Build A/B firmware
         run: python tools/build_release.py --work-root "$WORK_ROOT"
 
+      - name: Build receiver and stock USB installer
+        run: python tools/build_dongle_bundle.py --workspace "$WORK_ROOT/zmk-upstream" --output "$WORK_ROOT/dongle"
+
+      - name: Build matching radio keyboard firmware
+        run: |
+          python apex-zmk-g4b/build_g4b.py --stage 3 --usb-studio --kscan-ingest --persistent --plain-image --wireless-idle --ab-rollback --shell --extra-conf apex-zmk-g4b/g4b_shell_release.conf --extra-conf apex-zmk-g4b/g4b_radio_input.conf --work-root "$WORK_ROOT"
+          cp "$WORK_ROOT/dongle/apex-dongle.zip" "$RELEASE_DIR/"
+          cp "$WORK_ROOT/artifacts-repo-apex-zmk-g4b-wireless-idle-ab-v2/apex-zmk-g4b.plain.uf2" "$RELEASE_DIR/apex-keyboard-radio.uf2"
+          cp "$WORK_ROOT/artifacts-repo-apex-zmk-g4b-wireless-idle-ab-v2/apex-zmk-g4b.plain.config" "$RELEASE_DIR/apex-keyboard-radio.config"
+          cd "$RELEASE_DIR"
+          sha256sum apex-dongle.zip apex-keyboard-radio.uf2 apex-keyboard-radio.config >> RELEASE-SHA256SUMS.txt
+
       - name: Verify release files
         shell: bash
         run: |
@@ -56,6 +68,9 @@ jobs:
             "$RELEASE_DIR/apex-pro-mini-wl-bootloader-update.uf2"
             "$RELEASE_DIR/apex-pro-mini-wl-ab.zip"
             "$RELEASE_DIR/RELEASE-SHA256SUMS.txt"
+            "$RELEASE_DIR/apex-dongle.zip"
+            "$RELEASE_DIR/apex-keyboard-radio.uf2"
+            "$RELEASE_DIR/apex-keyboard-radio.config"
           )
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber

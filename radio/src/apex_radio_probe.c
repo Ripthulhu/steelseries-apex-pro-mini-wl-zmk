@@ -8,6 +8,7 @@
 #include "apex_hop_link.h"
 #include "apex_latency.h"
 #include <string.h>
+#include <stdlib.h>
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/entropy.h>
 #include <zephyr/drivers/clock_control/nrf_clock_control.h>
@@ -15,10 +16,24 @@
 #include <zephyr/sys/byteorder.h>
 #include <hal/nrf_radio.h>
 #include <zephyr/irq.h>
+#if IS_ENABLED(CONFIG_APEX_RADIO_BENCHMARK)
+#include <zmk/usb.h>
+#endif
 
 #define KEYBOARD_EVENT_RX IS_ENABLED(CONFIG_APEX_RADIO_KEYBOARD_EVENT_RX)
 #define EVENT_RX (IS_ENABLED(CONFIG_APEX_RECEIVER_RADIO_EVENT_RX) || KEYBOARD_EVENT_RX)
 #define HOP_ENABLED IS_ENABLED(CONFIG_APEX_RADIO_HOPPING)
+#if HOP_ENABLED || IS_ENABLED(CONFIG_APEX_RADIO_BENCHMARK)
+static atomic_t clock_tx_lead_us = 500;
+#endif
+#if EVENT_RX
+static K_SEM_DEFINE(radio_event, 0, 1);
+static K_SEM_DEFINE(tx_done, 0, 1);
+static atomic_t tx_pending;
+static atomic_t tx_wait_timeouts;
+static uint32_t tx_end_stamp;
+static void radio_receive(void);
+#endif
 #if HOP_ENABLED
 BUILD_ASSERT(!IS_ENABLED(CONFIG_NRFX_TIMER2) && !IS_ENABLED(CONFIG_NRFX_PPI),
              "Radio timing owns TIMER2 and PPI after Bluetooth shutdown");
@@ -31,6 +46,18 @@ static atomic_t hop_rx[4], clock_losses, control_rejected;
 static atomic_t hop_switch_max_us, sync_correction_max_us;
 static atomic_t sync_received, sync_gap_max, control_error, control_error_age;
 static atomic_t control_error_at, clock_loss_age;
+#if EVENT_RX
+static atomic_t hop_timer_interrupts, hop_timer_late;
+
+static void hop_timer_isr(const void *arg)
+{
+    ARG_UNUSED(arg);
+    NRF_TIMER2->INTENCLR = TIMER_INTENCLR_COMPARE0_Msk;
+    NRF_TIMER2->EVENTS_COMPARE[0] = 0;
+    atomic_inc(&hop_timer_interrupts);
+    k_sem_give(&radio_event);
+}
+#endif
 
 static uint64_t radio_time_us(void)
 {
@@ -47,21 +74,66 @@ static uint64_t radio_event_us(void)
     return now - (uint32_t)((uint32_t)now - NRF_TIMER2->CC[2]);
 }
 
+#if EVENT_RX
+static void hop_timer_arm(uint64_t wake_us)
+{
+    unsigned int key = irq_lock();
+    NRF_TIMER2->INTENCLR = TIMER_INTENCLR_COMPARE0_Msk;
+    NRF_TIMER2->EVENTS_COMPARE[0] = 0;
+    NVIC_ClearPendingIRQ(TIMER2_IRQn);
+    uint64_t now = radio_time_us();
+    uint32_t slot, phase;
+    if (hop_link.clock.running &&
+        !apex_hop_position(&hop_link.clock, now, &slot, &phase)) {
+        if (apex_hop_link_channel(&hop_link, now) != (int)NRF_RADIO->FREQUENCY) {
+            k_sem_give(&radio_event);
+            irq_unlock(key);
+            return;
+        }
+        wake_us = MIN(wake_us, now + APEX_HOP_SLOT_US - phase);
+        if (phase < APEX_INPUT_OPEN_US)
+            wake_us = MIN(wake_us, now + APEX_INPUT_OPEN_US - phase);
+        if (phase < 3000)
+            wake_us = MIN(wake_us, now + 3000 - phase);
+    }
+    uint32_t deadline = (uint32_t)wake_us;
+    NRF_TIMER2->CC[0] = deadline;
+    NRF_TIMER2->INTENSET = TIMER_INTENSET_COMPARE0_Msk;
+    /* A compare written after its deadline would wait for timer wrap. */
+    if ((int32_t)(deadline - (uint32_t)radio_time_us()) <= 0) {
+        NRF_TIMER2->INTENCLR = TIMER_INTENCLR_COMPARE0_Msk;
+        atomic_inc(&hop_timer_late);
+        k_sem_give(&radio_event);
+    }
+    irq_unlock(key);
+}
+#endif
+
 static void radio_timer_init(void)
 {
-    NRF_PPI->CHENCLR = BIT(17) | BIT(18);
+    NRF_PPI->CHENCLR = BIT(17) | BIT(18) | BIT(19);
     NRF_TIMER2->TASKS_STOP = 1;
     NRF_TIMER2->MODE = TIMER_MODE_MODE_Timer;
     NRF_TIMER2->BITMODE = TIMER_BITMODE_BITMODE_32Bit;
     NRF_TIMER2->PRESCALER = 4; /* 16 MHz / 16 = 1 MHz. */
     NRF_TIMER2->SHORTS = 0;
     NRF_TIMER2->INTENCLR = UINT32_MAX;
+#if EVENT_RX
+    IRQ_CONNECT(TIMER2_IRQn, 3, hop_timer_isr, NULL, 0);
+    NRF_TIMER2->EVENTS_COMPARE[0] = 0;
+    NVIC_ClearPendingIRQ(TIMER2_IRQn);
+    irq_enable(TIMER2_IRQn);
+#endif
     NRF_TIMER2->TASKS_CLEAR = 1;
     NRF_TIMER2->TASKS_START = 1;
     NRF_PPI->CH[17].EEP = (uint32_t)&NRF_RADIO->EVENTS_END;
     NRF_PPI->CH[17].TEP = (uint32_t)&NRF_TIMER2->TASKS_CAPTURE[2];
 #if KEYBOARD_EVENT_RX
-    NRF_PPI->FORK[17].TEP = (uint32_t)&NRF_EGU3->TASKS_TRIGGER[0];
+    NRF_PPI->FORK[17].TEP = 0;
+    NRF_PPI->CH[19].EEP = (uint32_t)&NRF_RADIO->EVENTS_DISABLED;
+    NRF_PPI->CH[19].TEP = (uint32_t)&NRF_EGU3->TASKS_TRIGGER[0];
+    NRF_PPI->FORK[19].TEP = 0;
+    NRF_PPI->CHENSET = BIT(19);
 #else
     NRF_PPI->FORK[17].TEP = 0;
 #endif
@@ -72,7 +144,6 @@ static void radio_timer_init(void)
 }
 #endif
 #if EVENT_RX
-static K_SEM_DEFINE(radio_event, 0, 1);
 static atomic_t rx_interrupts;
 static atomic_t rx_irq_cycle, rx_irq_pending, rx_wake_max_us;
 #if KEYBOARD_EVENT_RX
@@ -82,6 +153,15 @@ BUILD_ASSERT(!IS_ENABLED(CONFIG_NRFX_EGU3) && !IS_ENABLED(CONFIG_NRFX_SWI),
 static void radio_isr(const void *arg)
 {
     ARG_UNUSED(arg);
+    if (atomic_cas(&tx_pending, 1, 0)) {
+#if HOP_ENABLED
+        tx_end_stamp = NRF_TIMER2->CC[2];
+#endif
+        /* Both interrupt routes originate at DISABLED, after TX has stopped. */
+        radio_receive();
+        k_sem_give(&tx_done);
+        return;
+    }
     /* Leave END/DISABLED latched for the thread that owns the DMA buffer. */
 #if KEYBOARD_EVENT_RX
     NRF_EGU3->INTENCLR = EGU_INTENCLR_TRIGGERED0_Msk;
@@ -100,6 +180,7 @@ static K_SEM_DEFINE(start_signal, 0, 1);
 static enum apex_role local_role;
 static struct apex_connection connection;
 static uint8_t dma[APEX_PACKET_MAX + 1] __aligned(4);
+static uint8_t tx_dma[APEX_PACKET_MAX + 1] __aligned(4);
 static uint8_t rx[APEX_PACKET_MAX], tx[APEX_PACKET_MAX], plain[APEX_PACKET_PAYLOAD_MAX];
 static atomic_t running, state, received, transmitted, authenticated, rejected, sessions, error;
 static atomic_t replay_rejected;
@@ -123,7 +204,7 @@ static void maximum(atomic_t *value, uint32_t sample)
     atomic_val_t old = atomic_get(value);
     while (sample > (uint32_t)old && !atomic_cas(value, old, sample)) old = atomic_get(value);
 }
-static bool receiving;
+static volatile bool receiving;
 static struct onoff_client clock_client;
 #define INPUT_ENABLED (IS_ENABLED(CONFIG_APEX_G4B_RADIO_INPUT) || IS_ENABLED(CONFIG_APEX_RECEIVER_RADIO_INPUT))
 #if INPUT_ENABLED
@@ -131,17 +212,51 @@ static struct apex_input_queue input_queue;
 static struct k_spinlock input_lock;
 static uint32_t queued_at[APEX_INPUT_QUEUE_SIZE];
 static struct apex_latency queue_latency;
-static atomic_t input_selected, resync, queue_overflows, input_acked;
+static struct apex_latency send_ack_latency, ack_next_latency, completion_ack_latency;
+static struct apex_latency input_encode_latency, data_decode_latency, ack_encode_latency;
+static uint32_t timed_sequence, first_send_at, last_ack_at;
+static bool next_after_ack;
+
+/* Serialized with input_lock. Retries retain the first send timestamp. */
+static void input_trace_sent(uint32_t sequence, uint32_t started)
+{
+    if (sequence == timed_sequence) return;
+    timed_sequence = sequence;
+    first_send_at = started;
+    if (next_after_ack) {
+        apex_latency_add(&ack_next_latency, k_cyc_to_us_floor32(started - last_ack_at));
+        next_after_ack = false;
+    }
+}
+
+static void input_trace_acked(uint32_t sequence, bool more)
+{
+    uint32_t now = k_cycle_get_32();
+    if (sequence == timed_sequence) {
+        apex_latency_add(&send_ack_latency, k_cyc_to_us_floor32(now - first_send_at));
+    }
+    last_ack_at = now;
+    next_after_ack = more;
+}
+static atomic_t input_selected, resync, queue_overflows, input_acked, reply_pending;
 static atomic_t input_progress, queue_high_water;
 static atomic_t clock_input_advances;
 static atomic_t rx_sequence, input_delivered, duplicate_reports, usb_waits;
 static atomic_t completion_acks, completion_ack_max_us;
-static uint32_t pending_usb_sequence;
+static struct apex_delivery_tx delivery_tx;
+static uint32_t completion_notified;
+static struct {
+    uint8_t packet[APEX_PACKET_MAX], session_id[8];
+    uint32_t sequence, counter;
+    int length;
+} prepared_input;
+static atomic_t input_prepared, input_prepare_used, input_prepare_discarded;
 static atomic_t pause_requested, paused;
 static atomic_t link_timeouts, requested_resets;
 enum { RESET_QUEUE = 1, RESET_SELECTION = 2, RESET_COMMAND = 4, RESET_START = 8 };
 static atomic_t reset_reason, reset_at, timeout_at;
 __weak int apex_radio_deliver(const struct apex_input_frame *frame) { return -ENOTSUP; }
+__weak void apex_radio_delivery_status(struct apex_delivery_ack *ack) { memset(ack, 0, sizeof(*ack)); }
 __weak uint32_t apex_radio_completed(uint32_t *completed_at) { *completed_at = 0; return 0; }
 __weak void apex_radio_release(void) {}
 __weak uint8_t apex_radio_host_leds(void) { return 0; }
@@ -157,7 +272,8 @@ int apex_radio_queue_report(uint8_t type, const uint8_t *data, size_t length)
         queued_at[(input_queue.head + before) % APEX_INPUT_QUEUE_SIZE] = k_cycle_get_32();
     }
     maximum(&queue_high_water, input_queue.count);
-    bool start_sending = !before && input_queue.count;
+    bool start_sending = input_queue.count > before && !atomic_get(&reply_pending) &&
+                         delivery_tx.accepted == delivery_tx.sent && delivery_tx.free;
     if (rc == -2) {
         atomic_inc(&queue_overflows);
         atomic_or(&resync, RESET_QUEUE);
@@ -227,6 +343,7 @@ static void clock_ack_input(uint32_t previous_sync, uint64_t received_us)
 {
     if (local_role != APEX_KEYBOARD || hop_link.acked_sync <= previous_sync ||
         !apex_hop_link_ready(&hop_link, received_us)) return;
+    atomic_set(&reply_pending, 0);
     k_spinlock_key_t key = k_spin_lock(&input_lock);
     if (input_queue.count) {
         atomic_set(&input_progress, 1);
@@ -236,31 +353,273 @@ static void clock_ack_input(uint32_t previous_sync, uint64_t received_us)
 }
 #endif
 
+static struct {
+    uint8_t packet[APEX_PACKET_MAX], payload[APEX_DELIVERY_ACK_SIZE], session_id[8];
+    uint32_t counter;
+    int length;
+} prepared_ack;
+static atomic_t ack_prepared, ack_prepare_used, ack_prepare_discarded;
+
+static void ack_prepare_clear(void)
+{
+    if (prepared_ack.length) atomic_inc(&ack_prepare_discarded);
+    memset(&prepared_ack, 0, sizeof(prepared_ack));
+}
+
+static bool ack_prepared_matches(const uint8_t *payload)
+{
+    return prepared_ack.length > 0 &&
+           prepared_ack.counter == connection.session.tx_counter &&
+           !memcmp(prepared_ack.session_id, connection.session.id, 8) &&
+           !memcmp(prepared_ack.payload, payload, APEX_DELIVERY_ACK_SIZE);
+}
+
+static void ack_prepare_next(void)
+{
+    if (local_role != APEX_RECEIVER || connection.state != APEX_CONNECTION_ESTABLISHED ||
+        atomic_get(&resync)) return;
+    struct apex_delivery_ack ack;
+    apex_radio_delivery_status(&ack);
+    if (!ack.free || ack.accepted == UINT32_MAX) {
+        ack_prepare_clear();
+        return;
+    }
+    /* Predict acceptance only. USB completion must already have happened. */
+    ack.accepted++;
+    ack.free--;
+    uint8_t payload[APEX_DELIVERY_ACK_SIZE];
+    apex_delivery_ack_pack(&ack, payload);
+    if (ack_prepared_matches(payload)) return;
+    ack_prepare_clear();
+    int n = apex_connection_encode(&connection, APEX_PACKET_ACK, payload, sizeof(payload),
+                                   prepared_ack.packet, sizeof(prepared_ack.packet));
+    if (n <= 0) return;
+    memcpy(prepared_ack.payload, payload, sizeof(payload));
+    memcpy(prepared_ack.session_id, connection.session.id, 8);
+    prepared_ack.counter = connection.session.tx_counter;
+    prepared_ack.length = n;
+    atomic_inc(&ack_prepared);
+}
+
 static int input_ack(uint32_t sequence)
 {
-    uint8_t reply[6] = {APEX_INPUT_VERSION};
-    sys_put_le32(sequence, reply + 1);
-    reply[5] = apex_radio_host_leds();
-    return apex_connection_encode(&connection, APEX_PACKET_ACK, reply, sizeof(reply), tx, sizeof(tx));
+    ARG_UNUSED(sequence);
+    struct apex_delivery_ack ack;
+    apex_radio_delivery_status(&ack);
+    uint8_t reply[APEX_DELIVERY_ACK_SIZE];
+    apex_delivery_ack_pack(&ack, reply);
+    uint32_t started = k_cycle_get_32();
+    int rc;
+    if (ack_prepared_matches(reply)) {
+        rc = prepared_ack.length;
+        memcpy(tx, prepared_ack.packet, rc);
+        prepared_ack.length = 0;
+        atomic_inc(&ack_prepare_used);
+    } else {
+        ack_prepare_clear();
+        rc = apex_connection_encode(&connection, APEX_PACKET_ACK, reply, sizeof(reply), tx, sizeof(tx));
+    }
+    k_spinlock_key_t key = k_spin_lock(&input_lock);
+    apex_latency_add(&ack_encode_latency, k_cyc_to_us_floor32(k_cycle_get_32() - started));
+    k_spin_unlock(&input_lock, key);
+    return rc;
 }
+
+static void input_prepare_clear(void)
+{
+    if (prepared_input.length) atomic_inc(&input_prepare_discarded);
+    memset(&prepared_input, 0, sizeof(prepared_input));
+}
+
+static bool input_prepared_current(void)
+{
+    return prepared_input.length > 0 &&
+           prepared_input.counter == connection.session.tx_counter &&
+           !memcmp(prepared_input.session_id, connection.session.id, sizeof(prepared_input.session_id));
+}
+
+static int input_prepare_take(uint32_t sequence, uint8_t *out)
+{
+    if (!input_prepared_current() || prepared_input.sequence != sequence) {
+        input_prepare_clear();
+        return 0;
+    }
+    int length = prepared_input.length;
+    memcpy(out, prepared_input.packet, length);
+    prepared_input.length = 0;
+    atomic_inc(&input_prepare_used);
+    return length;
+}
+
+static void input_prepare_next(void)
+{
+    if (local_role != APEX_KEYBOARD || connection.state != APEX_CONNECTION_ESTABLISHED ||
+        atomic_get(&resync)) return;
+    if (input_prepared_current()) return;
+    input_prepare_clear();
+    struct apex_input_frame frame;
+    bool found = false;
+    k_spinlock_key_t key = k_spin_lock(&input_lock);
+    uint32_t wanted = delivery_tx.sent + 1;
+    if (wanted && input_queue.online) {
+        for (unsigned int i = 0; i < input_queue.count; i++) {
+            const struct apex_input_frame *candidate =
+                &input_queue.frames[(input_queue.head + i) % APEX_INPUT_QUEUE_SIZE];
+            if (candidate->sequence == wanted) {
+                /* Batched traffic is encoded together at the send site. */
+                if (i + 1 == input_queue.count) { frame = *candidate; found = true; }
+                break;
+            }
+        }
+    }
+    k_spin_unlock(&input_lock, key);
+    if (!found) return;
+    uint8_t payload[APEX_INPUT_CONSUMER_SIZE + 6];
+    int length = apex_input_pack(&frame, payload, sizeof(payload));
+    if (length < 0) return;
+    int n = apex_connection_encode(&connection, APEX_PACKET_INPUT, payload, length,
+                                   prepared_input.packet, sizeof(prepared_input.packet));
+    if (n <= 0) return;
+    /* Any subsequent encode invalidates this packet. Never rewind its reserved
+     * counter, even when a clock packet or session reset discards the result. */
+    prepared_input.sequence = frame.sequence;
+    prepared_input.counter = connection.session.tx_counter;
+    memcpy(prepared_input.session_id, connection.session.id, sizeof(prepared_input.session_id));
+    prepared_input.length = n;
+    atomic_inc(&input_prepared);
+}
+
+#if IS_ENABLED(CONFIG_APEX_RADIO_BENCHMARK)
+static atomic_t benchmark_running;
+int apex_radio_benchmark(const struct shell *sh, size_t argc, char **argv)
+{
+    unsigned long lead = 2000;
+    bool paced = argc > 2;
+    if (paced && strcmp(argv[2], "paced")) return -EINVAL;
+    if (argc > 1) {
+        char *end;
+        lead = strtoul(argv[1], &end, 10);
+        if (!argv[1][0] || *end || lead < 500 || lead > 2000) return -EINVAL;
+    }
+    if (!atomic_cas(&benchmark_running, 0, 1)) return -EBUSY;
+    k_spinlock_key_t key = k_spin_lock(&input_lock);
+    if (local_role != APEX_KEYBOARD || atomic_get(&input_selected) ||
+        !zmk_usb_is_hid_ready() || !apex_radio_input_connected() ||
+        !input_queue.online || input_queue.count || atomic_get(&resync)) {
+        k_spin_unlock(&input_lock, key);
+        atomic_set(&benchmark_running, 0);
+        shell_error(sh, "Keep keyboard USB connected and wait for the radio link to settle.");
+        return -EBUSY;
+    }
+    uint32_t session = atomic_get(&sessions), initial = atomic_get(&input_acked);
+    k_spin_unlock(&input_lock, key);
+    uint32_t previous_lead = atomic_set(&clock_tx_lead_us, lead);
+    uint32_t started = k_cycle_get_32(), sent = 0, delivered = 0, source_late_us = 0;
+    int64_t deadline = k_uptime_get() + 10000;
+    int rc = 0;
+    while (delivered < 1000) {
+        key = k_spin_lock(&input_lock);
+        if (atomic_get(&input_selected) || !zmk_usb_is_hid_ready() || atomic_get(&resync) ||
+            (uint32_t)atomic_get(&sessions) != session || !input_queue.online) {
+            rc = -ECANCELED;
+        } else if (k_uptime_get() >= deadline) {
+            rc = -ETIMEDOUT;
+        }
+        if (rc) {
+            k_spin_unlock(&input_lock, key);
+            break;
+        }
+        bool can_start = !atomic_get(&reply_pending) &&
+                         delivery_tx.accepted == delivery_tx.sent && delivery_tx.free;
+        uint32_t before_sent = sent;
+        uint32_t elapsed_us = k_cyc_to_us_floor32(k_cycle_get_32() - started);
+        uint32_t available = paced ? elapsed_us / 1000 + 1 : 1000;
+        /* Bypass state deduplication, but keep ordinary sequence/ACK handling.
+         * Every report has zero modifiers and zero key usages. */
+        while (sent < 1000 && sent < available && input_queue.count < APEX_INPUT_QUEUE_SIZE) {
+            if (input_queue.next_sequence == UINT32_MAX) { rc = -EOVERFLOW; break; }
+            uint8_t tail = (input_queue.head + input_queue.count) % APEX_INPUT_QUEUE_SIZE;
+            struct apex_input_frame *frame = &input_queue.frames[tail];
+            memset(frame, 0, sizeof(*frame));
+            frame->sequence = input_queue.next_sequence++;
+            frame->type = APEX_INPUT_KEYBOARD;
+            queued_at[tail] = k_cycle_get_32();
+            input_queue.count++;
+            if (paced && elapsed_us - sent * 1000 > source_late_us)
+                source_late_us = elapsed_us - sent * 1000;
+            sent++;
+        }
+        delivered = (uint32_t)atomic_get(&input_acked) - initial;
+        maximum(&queue_high_water, input_queue.count);
+        k_spin_unlock(&input_lock, key);
+        if (rc) break;
+        if (can_start && sent > before_sent) {
+            atomic_set(&input_progress, 1);
+            apex_radio_delivery_notify();
+        }
+        if (delivered < 1000) k_sleep(K_MSEC(1));
+    }
+    uint32_t elapsed = k_cyc_to_us_floor32(k_cycle_get_32() - started);
+    if (rc) apex_radio_request_session();
+    atomic_set(&clock_tx_lead_us, previous_lead);
+    atomic_set(&benchmark_running, 0);
+    shell_print(sh, "BENCH_SOURCE requested_hz=%u late_max_us=%u", paced ? 1000 : 0, source_late_us);
+    shell_print(sh, "BENCH lead_us=%lu sent=%u acked=%u elapsed_us=%u reports_per_s=%llu error=%d",
+                lead, sent, delivered, elapsed,
+                elapsed ? (unsigned long long)delivered * 1000000 / elapsed : 0, rc);
+    return rc;
+}
+#endif
 
 static int input_packet(uint8_t type, const uint8_t *data, size_t length)
 {
+    BUILD_ASSERT(APEX_DELIVERY_BATCH_SIZE <= APEX_PACKET_PAYLOAD_MAX);
     uint32_t ack = 0;
     if (local_role == APEX_KEYBOARD) {
-        if (type != APEX_PACKET_ACK || length != 6 || data[0] != APEX_INPUT_VERSION) return -EINVAL;
-        ack = sys_get_le32(data + 1);
+        struct apex_delivery_ack status;
+        if (type != APEX_PACKET_ACK || !apex_delivery_ack_unpack(data, length, &status)) return -EINVAL;
         k_spinlock_key_t key = k_spin_lock(&input_lock);
-        uint8_t head = input_queue.head;
-        if (apex_input_ack(&input_queue, ack)) {
+        uint32_t previous = delivery_tx.accepted, completed = delivery_tx.completed;
+        if (!apex_delivery_apply(&delivery_tx, &status)) {
+            k_spin_unlock(&input_lock, key);
+            return -EINVAL;
+        }
+        atomic_set(&reply_pending, 0);
+        while (input_queue.count && input_queue.frames[input_queue.head].sequence <= status.completed) {
+            uint8_t head = input_queue.head;
+            uint32_t sequence = input_queue.frames[head].sequence;
+            apex_input_ack(&input_queue, sequence);
+            input_trace_acked(sequence, input_queue.count != 0);
             apex_latency_add(&queue_latency,
                              k_cyc_to_us_floor32(k_cycle_get_32() - queued_at[head]));
             atomic_inc(&input_acked);
-            atomic_set(&input_progress, 1);
         }
+        if (status.accepted > previous || status.completed > completed ||
+            (input_queue.count && delivery_tx.free && delivery_tx.sent == delivery_tx.accepted))
+            atomic_set(&input_progress, 1);
         k_spin_unlock(&input_lock, key);
-        apex_radio_update_leds(data[5]);
+        apex_radio_update_leds(status.leds);
         return 0;
+    }
+    if (type == APEX_PACKET_INPUT_BATCH) {
+        struct apex_input_frame frames[APEX_DELIVERY_BATCH_MAX];
+        int count = apex_delivery_batch_unpack(data, length, frames);
+        if (count < 0) return -EINVAL;
+        /* Validate the whole batch before delivering any report. Retries may
+         * contain an accepted prefix; never enqueue that prefix twice. */
+        for (int i = 0; i < count; i++) {
+            uint32_t previous = (uint32_t)atomic_get(&rx_sequence);
+            if (frames[i].sequence <= previous) {
+                atomic_inc(&duplicate_reports);
+                continue;
+            }
+            if (previous == UINT32_MAX || frames[i].sequence != previous + 1) break;
+            int rc = apex_radio_deliver(&frames[i]);
+            if (rc == -EAGAIN) { atomic_inc(&usb_waits); break; }
+            if (rc) return rc;
+            atomic_set(&rx_sequence, frames[i].sequence);
+        }
+        return input_ack(atomic_get(&rx_sequence));
     }
     if (type == APEX_PACKET_INPUT) {
         struct apex_input_frame frame;
@@ -270,19 +629,9 @@ static int input_packet(uint8_t type, const uint8_t *data, size_t length)
             int rc = apex_radio_deliver(&frame);
             if (rc == -EAGAIN) {
                 atomic_inc(&usb_waits);
-                /* Give USB completion the first reply opportunity. Two ACKs
-                 * back-to-back can outrun the keyboard's receive rearm. A
-                 * retry still receives a liveness ACK while USB is stalled. */
-                if (pending_usb_sequence != frame.sequence) {
-                    pending_usb_sequence = frame.sequence;
-                    return 0;
-                }
-                /* Confirm radio liveness without acknowledging the pending
-                 * USB report. The sender keeps retrying this sequence. */
             } else {
                 if (rc) return rc;
                 atomic_set(&rx_sequence, frame.sequence);
-                atomic_inc(&input_delivered);
             }
         } else if (frame.sequence != previous) return -EINVAL;
         else atomic_inc(&duplicate_reports);
@@ -346,9 +695,12 @@ static int radio_start_immediate(uint8_t type)
 {
     unsigned int key = irq_lock();
 #if HOP_ENABLED
-    if (type == APEX_PACKET_INPUT || type == APEX_PACKET_ACK || type == APEX_PACKET_KEEPALIVE) {
+    if (type == APEX_PACKET_INPUT || type == APEX_PACKET_INPUT_BATCH ||
+        type == APEX_PACKET_ACK || type == APEX_PACKET_KEEPALIVE) {
         uint64_t now = radio_time_us();
-        if (!apex_hop_link_input_window(&hop_link, now) ||
+        bool window = type == APEX_PACKET_ACK ? apex_hop_link_reply_window(&hop_link, now) :
+                                              apex_hop_link_input_window(&hop_link, now);
+        if (!window ||
             apex_hop_link_channel(&hop_link, now) != (int)NRF_RADIO->FREQUENCY) {
             irq_unlock(key);
             atomic_inc(&tx_window_deferrals);
@@ -363,30 +715,64 @@ static int radio_start_immediate(uint8_t type)
     return 0;
 }
 
+#if HOP_ENABLED
+static int radio_arm_clock(uint64_t start_us)
+{
+    unsigned int key = irq_lock();
+    NRF_PPI->CHENCLR = BIT(18);
+    NRF_TIMER2->CC[1] = (uint32_t)start_us;
+    NRF_TIMER2->EVENTS_COMPARE[1] = 0;
+    /* Keep the deadline check and PPI enable together. Preemption here could
+     * otherwise miss the compare and leave the radio waiting for timer wrap. */
+    if (radio_time_us() + 100 >= start_us) {
+        irq_unlock(key);
+        return -EAGAIN;
+    }
+    NRF_PPI->CHENSET = BIT(18);
+    irq_unlock(key);
+    return 0;
+}
+#endif
+
 static int radio_send(const uint8_t *packet, size_t length, uint64_t scheduled_end_us)
 {
     if (length < 2 || length > APEX_PACKET_MAX) return -EINVAL;
     int rc = radio_stop();
     if (rc) return rc;
-    dma[0] = length;
-    memcpy(dma + 1, packet, length);
-    NRF_RADIO->PACKETPTR = (uint32_t)dma;
+    tx_dma[0] = length;
+    memcpy(tx_dma + 1, packet, length);
+    NRF_RADIO->PACKETPTR = (uint32_t)tx_dma;
     NRF_RADIO->EVENTS_END = 0;
     NRF_RADIO->EVENTS_DISABLED = 0;
     __DMB();
+#if EVENT_RX
+    /* Clear any old receive interrupt before publishing TX ownership. */
+    unsigned int tx_key = irq_lock();
+    k_sem_reset(&tx_done);
+#if KEYBOARD_EVENT_RX
+    NRF_EGU3->EVENTS_TRIGGERED[0] = 0;
+    NVIC_ClearPendingIRQ(SWI3_EGU3_IRQn);
+    NRF_EGU3->INTENSET = EGU_INTENSET_TRIGGERED0_Msk;
+#else
+    NVIC_ClearPendingIRQ(RADIO_IRQn);
+    NRF_RADIO->INTENSET = RADIO_INTENSET_DISABLED_Msk;
+#endif
+    atomic_set(&tx_pending, 1);
+#endif
 #if HOP_ENABLED
     if (scheduled_end_us) {
         /* One-byte preamble, five-byte address, length byte and three-byte CRC.
          * Fast ramp-up is 40 us; Nordic 2 Mbit mode sends each byte in 4 us. */
         uint64_t start_us = scheduled_end_us - (40 + (length + 10) * 4);
-        NRF_TIMER2->CC[1] = (uint32_t)start_us;
-        NRF_TIMER2->EVENTS_COMPARE[1] = 0;
-        if (radio_time_us() + 100 >= start_us) {
+        if (radio_arm_clock(start_us)) {
             atomic_inc(&sync_missed);
+#if EVENT_RX
+            atomic_set(&tx_pending, 0);
+            irq_unlock(tx_key);
+#endif
             radio_receive();
             return -EAGAIN;
         }
-        NRF_PPI->CHENSET = BIT(18);
     } else
 #else
     ARG_UNUSED(scheduled_end_us);
@@ -394,10 +780,26 @@ static int radio_send(const uint8_t *packet, size_t length, uint64_t scheduled_e
     {
         rc = radio_start_immediate(packet[1]);
         if (rc) {
+#if EVENT_RX
+            atomic_set(&tx_pending, 0);
+            irq_unlock(tx_key);
+#endif
             radio_receive();
             return rc;
         }
     }
+#if EVENT_RX
+    irq_unlock(tx_key);
+    if (k_sem_take(&tx_done, K_MSEC(scheduled_end_us ? 5 : 2))) {
+        atomic_inc(&tx_wait_timeouts);
+#if HOP_ENABLED
+        NRF_PPI->CHENCLR = BIT(18);
+#endif
+        (void)radio_stop();
+        atomic_set(&tx_pending, 0);
+        return -ETIMEDOUT;
+    }
+#else
     uint32_t start = k_cycle_get_32();
     while (!NRF_RADIO->EVENTS_DISABLED) {
         if (k_cyc_to_us_floor32(k_cycle_get_32() - start) > (scheduled_end_us ? 5000 : 2000)) {
@@ -408,16 +810,25 @@ static int radio_send(const uint8_t *packet, size_t length, uint64_t scheduled_e
             return -ETIMEDOUT;
         }
     }
+#endif
 #if HOP_ENABLED
     NRF_PPI->CHENCLR = BIT(18);
     if (scheduled_end_us) {
-        int32_t delta = (uint32_t)NRF_TIMER2->CC[2] - (uint32_t)scheduled_end_us;
+        uint32_t stamp =
+#if EVENT_RX
+            tx_end_stamp;
+#else
+            NRF_TIMER2->CC[2];
+#endif
+        int32_t delta = stamp - (uint32_t)scheduled_end_us;
         maximum(&stamp_error_max, delta < 0 ? -delta : delta);
         atomic_inc(&sync_sent);
     }
 #endif
     atomic_inc(&transmitted);
+#if !EVENT_RX
     radio_receive();
+#endif
     return 0;
 }
 
@@ -490,9 +901,15 @@ static int new_session(void)
 #if INPUT_ENABLED
     k_spinlock_key_t key = k_spin_lock(&input_lock);
     apex_input_disconnect(&input_queue);
+    timed_sequence = 0;
+    next_after_ack = false;
     k_spin_unlock(&input_lock, key);
     atomic_set(&rx_sequence, 0);
-    pending_usb_sequence = 0;
+    apex_delivery_tx_reset(&delivery_tx);
+    input_prepare_clear();
+    ack_prepare_clear();
+    atomic_set(&reply_pending, 0);
+    completion_notified = 0;
     atomic_set(&input_progress, 0);
     if (local_role == APEX_RECEIVER) apex_radio_release();
 #endif
@@ -521,7 +938,8 @@ static void probe_thread(void *a, void *b, void *c)
     if (!rc) rc = radio_init();
     if (!rc) rc = new_session();
     if (rc) goto failed;
-    int64_t last_valid = k_uptime_get(), next_send = 0;
+    int64_t last_valid = k_uptime_get();
+    uint64_t next_send = 0;
     uint32_t last_loop = k_cycle_get_32();
 #if !INPUT_ENABLED
     uint32_t ping = 0;
@@ -551,6 +969,7 @@ static void probe_thread(void *a, void *b, void *c)
         maximum(&max_loop_us, loop_us);
         if (loop_us > 10000) atomic_inc(&loops_over_10ms);
         int64_t now = k_uptime_get();
+        int timeout_ms = INPUT_ENABLED ? 100 : 400;
         if (receiving && NRF_RADIO->EVENTS_END) {
 #if EVENT_RX
             if (atomic_set(&rx_irq_pending, 0)) {
@@ -605,7 +1024,16 @@ static void probe_thread(void *a, void *b, void *c)
 #endif
                 else {
                     uint8_t type = 0;
+#if INPUT_ENABLED
+                    uint32_t decode_started = k_cycle_get_32();
+#endif
                     n = apex_connection_decode(&connection, rx, length, &type, plain, sizeof(plain));
+#if INPUT_ENABLED
+                    k_spinlock_key_t decode_key = k_spin_lock(&input_lock);
+                    apex_latency_add(&data_decode_latency,
+                                     k_cyc_to_us_floor32(k_cycle_get_32() - decode_started));
+                    k_spin_unlock(&input_lock, decode_key);
+#endif
                     if (n >= 0) {
                         atomic_inc(&authenticated);
 #if INPUT_ENABLED
@@ -667,7 +1095,7 @@ static void probe_thread(void *a, void *b, void *c)
             if (!receiving) radio_receive();
         }
         uint32_t reset_requested = 0;
-        int timeout_ms = local_role == APEX_KEYBOARD ? 5500 : 4000;
+        timeout_ms = local_role == APEX_KEYBOARD ? 5500 : 4000;
 #if HOP_ENABLED
         timeout_ms = (connection.state == APEX_CONNECTION_WAIT_HELLO ||
                       connection.state == APEX_CONNECTION_WAIT_CHALLENGE) ? 1500 : 400;
@@ -745,8 +1173,8 @@ static void probe_thread(void *a, void *b, void *c)
         }
 #endif
 #if INPUT_ENABLED
-        /* USB callbacks only wake this thread. It owns the session, cipher
-         * counters and radio, including acknowledgements after USB completion. */
+        /* Return completion in the next solicited reply. An unsolicited ACK
+         * can collide with the keyboard's next input transmission. */
         if (local_role == APEX_RECEIVER && apex_radio_input_connected()
 #if HOP_ENABLED
             && apex_hop_link_input_window(&hop_link, radio_time_us())
@@ -754,31 +1182,31 @@ static void probe_thread(void *a, void *b, void *c)
             && !(receiving && NRF_RADIO->EVENTS_END)) {
             uint32_t completed_at;
             uint32_t sequence = apex_radio_completed(&completed_at);
-            if (sequence && sequence == (uint32_t)atomic_get(&rx_sequence) + 1) {
-                atomic_set(&rx_sequence, sequence);
-                atomic_inc(&input_delivered);
-                int n = input_ack(sequence);
-                if (n < 0) { rc = n; goto failed; }
-                rc = radio_send(tx, n, 0);
-                if (rc == -EAGAIN) goto wait_next;
-                if (rc) goto failed;
-                atomic_inc(&completion_acks);
-                maximum(&completion_ack_max_us,
-                        k_cyc_to_us_floor32(k_cycle_get_32() - completed_at));
+            if (sequence > completion_notified) {
+                atomic_add(&input_delivered, sequence - completion_notified);
+                completion_notified = sequence;
             }
         }
 #endif
 #if INPUT_ENABLED
-        if (atomic_set(&input_progress, 0)) next_send = now;
+        if (atomic_set(&input_progress, 0)) next_send = 0;
 #endif
-        if (local_role == APEX_KEYBOARD && now >= next_send) {
+#if HOP_ENABLED
+        uint64_t send_now = radio_time_us();
+#else
+        uint64_t send_now = (uint64_t)k_uptime_get() * 1000;
+#endif
+        if (local_role == APEX_KEYBOARD && send_now >= next_send) {
             int n;
+#if INPUT_ENABLED
+            uint32_t send_sequence = 0;
+#endif
             uint64_t scheduled_end = 0;
             if (connection.state == APEX_CONNECTION_ESTABLISHED) {
 #if INPUT_ENABLED
 #if HOP_ENABLED
                 if (apex_hop_link_window(&hop_link, radio_time_us())) {
-                    scheduled_end = radio_time_us() + 2000 + 40 + (36 + 10) * 4;
+                    scheduled_end = radio_time_us() + atomic_get(&clock_tx_lead_us) + 40 + (36 + 10) * 4;
                     n = apex_hop_link_next(&hop_link, &connection, scheduled_end, tx, sizeof(tx));
                     if (n < 0) {
                         atomic_or(&resync, RESET_START);
@@ -792,15 +1220,28 @@ static void probe_thread(void *a, void *b, void *c)
                 scheduled_end = 0;
                 if (!apex_hop_link_input_window(&hop_link, radio_time_us())) goto wait_next;
 #endif
-                struct apex_input_frame frame;
+                struct apex_input_frame frames[APEX_DELIVERY_BATCH_MAX];
                 k_spinlock_key_t key = k_spin_lock(&input_lock);
-                bool queued = apex_input_peek(&input_queue, &frame);
+                unsigned int count = apex_delivery_batch(&delivery_tx, &input_queue, frames);
+                bool queued = count != 0;
+                if (queued) send_sequence = frames[count - 1].sequence;
                 k_spin_unlock(&input_lock, key);
-                uint8_t payload[APEX_INPUT_CONSUMER_SIZE + 6];
-                int length = queued ? apex_input_pack(&frame, payload, sizeof(payload)) : 1;
+                uint8_t payload[APEX_DELIVERY_BATCH_SIZE];
+                int length = count > 1 ? apex_delivery_batch_pack(frames, count, payload, sizeof(payload)) :
+                             queued ? apex_input_pack(frames, payload, sizeof(payload)) : 1;
                 if (!queued) payload[0] = APEX_INPUT_VERSION;
-                n = apex_connection_encode(&connection, queued ? APEX_PACKET_INPUT : APEX_PACKET_KEEPALIVE,
-                                           payload, length, tx, sizeof(tx));
+                if (length < 0) { atomic_or(&resync, RESET_QUEUE); goto wait_next; }
+                uint32_t encode_started = k_cycle_get_32();
+                n = count == 1 ? input_prepare_take(frames[0].sequence, tx) : 0;
+                if (!n) n = apex_connection_encode(&connection,
+                    count > 1 ? APEX_PACKET_INPUT_BATCH : queued ? APEX_PACKET_INPUT : APEX_PACKET_KEEPALIVE,
+                    payload, length, tx, sizeof(tx));
+                if (queued) {
+                    key = k_spin_lock(&input_lock);
+                    apex_latency_add(&input_encode_latency,
+                                     k_cyc_to_us_floor32(k_cycle_get_32() - encode_started));
+                    k_spin_unlock(&input_lock, key);
+                }
 #else
                 uint8_t payload[4];
                 sys_put_le32(++ping, payload);
@@ -812,18 +1253,71 @@ static void probe_thread(void *a, void *b, void *c)
 transmit:
 #endif
             if (n > 0) {
+#if INPUT_ENABLED
+                uint32_t send_started = k_cycle_get_32();
+#endif
+#if INPUT_ENABLED
+                atomic_set(&reply_pending, 1);
+#endif
                 rc = radio_send(tx, n, scheduled_end);
+#if INPUT_ENABLED
+                if (rc) atomic_set(&reply_pending, 0);
+#endif
                 if (rc == -EAGAIN) goto wait_next;
                 if (rc) goto failed;
+#if INPUT_ENABLED
+                if (send_sequence) {
+                    k_spinlock_key_t timing_key = k_spin_lock(&input_lock);
+                    delivery_tx.sent = MAX(delivery_tx.sent, send_sequence);
+                    input_trace_sent(send_sequence, send_started);
+                    k_spin_unlock(&input_lock, timing_key);
+                }
+#endif
             }
-            next_send = now + (INPUT_ENABLED ? 5 : 100);
+            uint32_t retry_us = INPUT_ENABLED ? 5000 : 100000;
+#if INPUT_ENABLED
+            k_spinlock_key_t pending_key = k_spin_lock(&input_lock);
+            if (input_queue.count) retry_us = 1500;
+            k_spin_unlock(&input_lock, pending_key);
+#endif
+#if HOP_ENABLED
+            next_send = radio_time_us() + retry_us;
+#else
+            next_send = (uint64_t)k_uptime_get() * 1000 + retry_us;
+#endif
         }
 wait_next:
+#if INPUT_ENABLED
+        if (receiving && !NRF_RADIO->EVENTS_END) {
+            input_prepare_next();
+            ack_prepare_next();
+        }
+#endif
         maximum(&max_process_us, k_cyc_to_us_floor32(k_cycle_get_32() - loop_start));
 #if EVENT_RX
+#if HOP_ENABLED
+        uint64_t wait_now = radio_time_us();
+        uint64_t wake_us = wait_now + 10000;
+        if (local_role == APEX_KEYBOARD) {
+            if (next_send > wait_now) wake_us = MIN(wake_us, next_send);
+            else {
+                uint32_t slot, phase;
+                if (!apex_hop_link_input_window(&hop_link, wait_now) &&
+                    !apex_hop_position(&hop_link.clock, wait_now, &slot, &phase)) {
+                    uint32_t delay = phase < APEX_INPUT_OPEN_US ? APEX_INPUT_OPEN_US - phase :
+                                     APEX_HOP_SLOT_US - phase + APEX_INPUT_OPEN_US;
+                    wake_us = MIN(wake_us, wait_now + delay);
+                } else wake_us = wait_now + 100;
+            }
+        }
+        hop_timer_arm(wake_us);
+#endif
         int64_t remaining = last_valid + timeout_ms - k_uptime_get();
-        /* Hopping needs channel checks between packets; fixed-channel RX can sleep longer. */
-        k_sem_take(&radio_event, K_MSEC(MAX(1, MIN(remaining, HOP_ENABLED ? 1 : 20))));
+        /* TIMER2 supplies transaction deadlines; the timeout bounds recovery. */
+        k_sem_take(&radio_event, K_MSEC(MAX(1, MIN(remaining, 20))));
+#if HOP_ENABLED
+        NRF_TIMER2->INTENCLR = TIMER_INTENCLR_COMPARE0_Msk;
+#endif
 #else
         k_sleep(K_MSEC(1));
 #endif
@@ -835,13 +1329,15 @@ failed:
     atomic_set(&error, rc);
     (void)radio_stop();
 #if HOP_ENABLED
-    NRF_PPI->CHENCLR = BIT(17) | BIT(18);
+    NRF_PPI->CHENCLR = BIT(17) | BIT(18) | BIT(19);
+    NRF_TIMER2->INTENCLR = UINT32_MAX;
     NRF_TIMER2->TASKS_STOP = 1;
 #endif
     apex_connection_clear(&connection);
     atomic_set(&state, APEX_CONNECTION_OFF);
 }
-K_THREAD_DEFINE(apex_probe_tid, 3072, probe_thread, NULL, NULL, NULL, 8, 0, 0);
+K_THREAD_DEFINE(apex_probe_tid, 3072, probe_thread, NULL, NULL, NULL,
+                K_PRIO_PREEMPT(CONFIG_APEX_RADIO_THREAD_PRIORITY), 0, 0);
 
 void apex_radio_probe_start(enum apex_role role)
 {
@@ -898,9 +1394,37 @@ int apex_radio_probe_status(const struct shell *sh, size_t argc, char **argv)
     shell_print(sh, "QUEUE high_water=%ld capacity=%u",
                 (long)atomic_get(&queue_high_water), APEX_INPUT_QUEUE_SIZE);
     shell_print(sh, "QUEUE clock_ack_advances=%ld", (long)atomic_get(&clock_input_advances));
+    shell_print(sh, "PREPARE input=%ld used=%ld discarded=%ld",
+                (long)atomic_get(&input_prepared), (long)atomic_get(&input_prepare_used),
+                (long)atomic_get(&input_prepare_discarded));
+    shell_print(sh, "PREPARE_ACK total=%ld used=%ld discarded=%ld",
+                (long)atomic_get(&ack_prepared), (long)atomic_get(&ack_prepare_used),
+                (long)atomic_get(&ack_prepare_discarded));
     k_spinlock_key_t latency_key = k_spin_lock(&input_lock);
     struct apex_latency latency = queue_latency;
+    struct apex_latency send_ack = send_ack_latency, ack_next = ack_next_latency;
+    struct apex_latency completion_ack = completion_ack_latency;
+    struct apex_latency input_encode = input_encode_latency, data_decode = data_decode_latency;
+    struct apex_latency ack_encode = ack_encode_latency;
     k_spin_unlock(&input_lock, latency_key);
+    shell_print(sh, "SEND_ACK count=%u min_us=%u max_us=%u total_us=%llu",
+                send_ack.count, send_ack.min_us, send_ack.max_us,
+                (unsigned long long)send_ack.total_us);
+    shell_print(sh, "ACK_NEXT count=%u min_us=%u max_us=%u total_us=%llu",
+                ack_next.count, ack_next.min_us, ack_next.max_us,
+                (unsigned long long)ack_next.total_us);
+    shell_print(sh, "COMPLETE_ACK count=%u min_us=%u max_us=%u total_us=%llu",
+                completion_ack.count, completion_ack.min_us, completion_ack.max_us,
+                (unsigned long long)completion_ack.total_us);
+    shell_print(sh, "INPUT_ENCODE count=%u min_us=%u max_us=%u total_us=%llu",
+                input_encode.count, input_encode.min_us, input_encode.max_us,
+                (unsigned long long)input_encode.total_us);
+    shell_print(sh, "DATA_DECODE count=%u min_us=%u max_us=%u total_us=%llu",
+                data_decode.count, data_decode.min_us, data_decode.max_us,
+                (unsigned long long)data_decode.total_us);
+    shell_print(sh, "ACK_ENCODE count=%u min_us=%u max_us=%u total_us=%llu",
+                ack_encode.count, ack_encode.min_us, ack_encode.max_us,
+                (unsigned long long)ack_encode.total_us);
     shell_print(sh, "QUEUE_ACK count=%u min_us=%u max_us=%u total_us=%llu",
                 latency.count, latency.min_us, latency.max_us,
                 (unsigned long long)latency.total_us);
@@ -912,7 +1436,14 @@ int apex_radio_probe_status(const struct shell *sh, size_t argc, char **argv)
     shell_print(sh, "AES hardware_blocks=%lu software_fallback=%lu",
                 (unsigned long)apex_aes_blocks(), (unsigned long)apex_aes_fallbacks());
 #endif
+#if HOP_ENABLED && EVENT_RX
+    shell_print(sh, "HOP_TIMER interrupts=%ld late_arm=%ld",
+                (long)atomic_get(&hop_timer_interrupts), (long)atomic_get(&hop_timer_late));
+#endif
     shell_print(sh, "TX window_deferrals=%ld", (long)atomic_get(&tx_window_deferrals));
+#if EVENT_RX
+    shell_print(sh, "TX wait_timeout=%ld", (long)atomic_get(&tx_wait_timeouts));
+#endif
     shell_print(sh, "APX_RF_TEST role=%u started=%ld state=%ld sessions=%ld tx=%ld rx=%ld auth=%ld replay=%ld rejected=%ld error=%ld",
                 local_role, (long)atomic_get(&running), (long)atomic_get(&state),
                 (long)atomic_get(&sessions), (long)atomic_get(&transmitted),

@@ -19,6 +19,7 @@ def main():
     packet_types = header[enum_start:header.index('};', enum_start) + 2]
     harness = r'''
 #include <stdint.h>
+#include <stdbool.h>
 #include <assert.h>
 #include <errno.h>
 #define ARG_UNUSED(x) (void)(x)
@@ -29,10 +30,13 @@ static unsigned int irq_lock(void) { assert(!locked); locked = 1; return 7; }
 static void irq_unlock(unsigned int key) { assert(locked && key == 7); locked = 0; }
 #define atomic_inc(p) (++*(p))
 #if HOP_ENABLED
-static int window, channel, hop_link;
+static int window, reply_window, channel, hop_link;
 static uint64_t radio_time_us(void) { assert(locked); return 1234; }
 static int apex_hop_link_input_window(int *p, uint64_t now) {
     assert(locked && p == &hop_link && now == 1234); return window;
+}
+static int apex_hop_link_reply_window(int *p, uint64_t now) {
+    assert(locked && p == &hop_link && now == 1234); return reply_window;
 }
 static int apex_hop_link_channel(int *p, uint64_t now) {
     assert(locked && p == &hop_link && now == 1234); return channel;
@@ -41,17 +45,19 @@ static int apex_hop_link_channel(int *p, uint64_t now) {
 '''
     checks = r'''
 int main(void) {
-    uint8_t types[] = {APEX_PACKET_INPUT, APEX_PACKET_ACK, APEX_PACKET_KEEPALIVE,
+    uint8_t types[] = {APEX_PACKET_INPUT, APEX_PACKET_ACK, APEX_PACKET_KEEPALIVE, APEX_PACKET_INPUT_BATCH,
                        APEX_PACKET_CONTROL, APEX_PACKET_CHANNEL_MAP, 0x80};
     for (unsigned int i = 0; i < sizeof(types); i++) {
-        for (int scenario = 0; scenario < 3; scenario++) {
+        for (int scenario = 0; scenario < 4; scenario++) {
             radio.TASKS_TXEN = tx_window_deferrals = 0;
             radio.FREQUENCY = 26;
             int defer = 0;
 #if HOP_ENABLED
-            window = scenario != 0;
+            window = scenario != 0 && scenario != 3;
+            reply_window = scenario != 0;
             channel = scenario == 1 ? 50 : 26;
-            defer = i < 3 && scenario < 2;
+            defer = i < 4 && scenario < 2;
+            if (scenario == 3) defer = i < 4 && types[i] != APEX_PACKET_ACK;
 #endif
             assert(radio_start_immediate(types[i]) == (defer ? -EAGAIN : 0));
             assert(!locked && radio.TASKS_TXEN == (unsigned int)!defer);

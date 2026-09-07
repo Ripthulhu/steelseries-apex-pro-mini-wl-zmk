@@ -54,3 +54,8 @@ int fixture_hl_input_window(struct apex_hop_link *l, uint32_t now)
 {
     return apex_hop_link_input_window(l, now);
 }
+
+int fixture_hl_reply_window(struct apex_hop_link *l, uint32_t now)
+{
+    return apex_hop_link_reply_window(l, now);
+}

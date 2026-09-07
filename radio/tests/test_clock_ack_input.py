@@ -20,6 +20,7 @@ def main():
 #define APEX_KEYBOARD 0
 typedef int k_spinlock_key_t;
 static int local_role, input_lock, input_progress, clock_input_advances, ready;
+static int reply_pending;
 static struct { uint32_t acked_sync; } hop_link;
 static struct { unsigned int count; } input_queue;
 #define apex_hop_link_ready(l,t) ((void)(l), (void)(t), ready)
@@ -35,10 +36,13 @@ int main(void) {
             for (input_queue.count = 0; input_queue.count < 2; input_queue.count++)
                 for (hop_link.acked_sync = 9; hop_link.acked_sync < 12; hop_link.acked_sync++) {
                     input_progress = clock_input_advances = 0;
+                    reply_pending = 1;
                     clock_ack_input(10, 1234);
                     int expected = local_role == 0 && ready && input_queue.count &&
                                    hop_link.acked_sync > 10;
                     assert(input_progress == expected && clock_input_advances == expected);
+                    assert(reply_pending == !(local_role == 0 && ready &&
+                                              hop_link.acked_sync > 10));
                     assert(input_queue.count <= 1);
                 }
     return 0;

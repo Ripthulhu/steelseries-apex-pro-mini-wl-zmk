@@ -53,9 +53,9 @@ class PacketTests(unittest.TestCase):
         self.assertTrue(self.returned)
         return struct.unpack('<i', struct.pack('<I', self.cpu.reg_read(UC_ARM_REG_R0)))[0]
 
-    def encode(self, payload, sender=CTX):
+    def encode(self, payload, sender=CTX, packet_type=1):
         self.cpu.mem_write(DATA, payload or b'\x00')
-        n = self.call('apex_packet_encode', sender, 1, DATA, len(payload), OUT, 88)
+        n = self.call('apex_packet_encode', sender, packet_type, DATA, len(payload), OUT, 88)
         self.assertEqual(n, 24 + len(payload))
         return bytes(self.cpu.mem_read(OUT, n))
 
@@ -322,13 +322,15 @@ class PacketTests(unittest.TestCase):
             _, wire = self.link_next(now)
             _, ack = self.link_receive(LINK_D, PEER, wire, now + 8000)
             self.assertEqual(self.link_receive(LINK_K, CTX, ack, now + 1000)[0], 0)
-            for phase in (0, 1999, 2000, 12999, 13000, 17999, 18000, 19999):
-                expected = int(slot >= 5 and 2000 <= phase < 18000)
+            for phase in (0, 749, 750, 12999, 13000, 18499, 18500, 19499, 19500, 19999):
+                expected = int(slot >= 5 and 750 <= phase < 18500)
                 for link, offset in ((LINK_K, 0), (LINK_D, 8000)):
                     t = 12000 + slot * 20000 + phase + offset
                     # The receiver cannot extrapolate backwards before its latest sync.
                     if link == LINK_D and phase < 5000:
                         continue
+                    self.assertEqual(self.call('fixture_hl_reply_window', link, t),
+                                     int(slot >= 5 and 750 <= phase < 19500))
                     self.assertEqual(self.call('fixture_hl_input_window', link, t), expected)
             if slot >= 5:
                 self.assertEqual(self.call('fixture_hl_window', LINK_K,
@@ -384,6 +386,19 @@ class PacketTests(unittest.TestCase):
                 self.assertEqual(wire[16:], AESCCM(DERIVED[:16], tag_length=8).encrypt(nonce, data, wire[:16]))
                 self.assertEqual(self.decode(wire), n)
                 self.assertEqual(bytes(self.cpu.mem_read(DATA, n)), data)
+
+    def test_authenticated_input_batch(self):
+        payload = bytes([2, 3]) + b''.join(
+            bytes([2]) + struct.pack('<I', sequence) + bytes([kind]) + bytes(size)
+            for sequence, kind, size in ((1, 1, 8), (2, 2, 12), (3, 1, 8)))
+        wire = self.encode(payload, packet_type=6)
+        altered = bytearray(wire)
+        altered[1] = 1
+        self.assertEqual(self.decode(bytes(altered)), -2)
+        self.assertEqual(self.decode(wire), len(payload))
+        self.assertEqual(bytes(self.cpu.mem_read(TYPE, 1)), b'\x06')
+        self.assertEqual(self.call('apex_delivery_batch_unpack', DATA, len(payload), 0x2000b000), 3)
+        self.assertEqual(self.decode(wire), -3)
 
     def test_bidirectional_and_reflection(self):
         wire = self.encode(b'downlink', PEER)
@@ -458,7 +473,7 @@ class PacketTests(unittest.TestCase):
         press = bytes([2, 0, 4, 0, 0, 0, 0, 0])
         self.assertEqual(self.input_push(press), 0)
         self.assertEqual(self.input_push(bytes(8)), 0)
-        expected = bytes([1]) + struct.pack('<I', 3) + bytes([1]) + press
+        expected = bytes([2]) + struct.pack('<I', 3) + bytes([1]) + press
         self.assertEqual(self.input_head(), expected)
         self.assertEqual(self.call('apex_input_ack', CTX, 0), 0)
         self.assertEqual(self.call('apex_input_ack', CTX, 2), 0)
@@ -499,7 +514,7 @@ class PacketTests(unittest.TestCase):
         self.input_push(bytes([1]) + bytes(11), 2)
         wire = self.input_head()
         self.assertEqual(self.call('apex_input_unpack', IN, len(wire), OUT), 0)
-        for bad in (wire[:-1], wire + b'\x00', b'\x02' + wire[1:],
+        for bad in (wire[:-1], wire + b'\x00', b'\x01' + wire[1:],
                     wire[:1] + bytes(4) + wire[5:], wire[:5] + b'\x09' + wire[6:]):
             self.cpu.mem_write(IN, bad)
             self.assertEqual(self.call('apex_input_unpack', IN, len(bad), OUT), -1)
@@ -600,6 +615,7 @@ if __name__ == '__main__':
                '-I' + str(radio / 'include'), '-I' + str(tiny / 'include'),
                str(radio / 'src/apex_packet.c'), str(radio / 'src/apex_connection.c'),
                str(radio / 'src/apex_input.c'),
+               str(radio / 'src/apex_delivery.c'),
                str(radio / 'src/apex_hop.c'),
                str(radio / 'src/apex_hop_link.c'),
                str(radio / 'tests/packet_fixture.c')]

@@ -1186,6 +1186,10 @@ static int cmd_power(const struct shell *sh, size_t argc, char **argv)
 
 SHELL_STATIC_SUBCMD_SET_CREATE(
     apex_sub,
+#if IS_ENABLED(CONFIG_APEX_RADIO_BENCHMARK)
+    SHELL_CMD_ARG(radio_bench, NULL, "Send 1000 empty reports: [clock lead 500..2000 us] [paced].",
+                  apex_radio_benchmark, 1, 2),
+#endif
 #if IS_ENABLED(CONFIG_APEX_G4B_RADIO_PROBE)
     SHELL_CMD_ARG(radio_test, NULL, "Radio connection and delivery counters.",
                   apex_radio_probe_status, 1, 0),

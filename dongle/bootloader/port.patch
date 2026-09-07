@@ -1,0 +1,327 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 58238bf..537e3ae 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -175,11 +175,15 @@ target_compile_options(bootloader PUBLIC
+   )
+ target_compile_definitions(bootloader PUBLIC
+   SOFTDEVICE_PRESENT
+-  CONFIG_GPIO_AS_PINRESET
+   __START=main
+   __STARTUP_CLEAR_BSS
+   )
+ 
++# The dongle has no reset button; preserve its factory pin selections.
++if (NOT BOARD STREQUAL "apex_dongle_wl")
++  target_compile_definitions(bootloader PUBLIC CONFIG_GPIO_AS_PINRESET)
++endif ()
++
+ if (SIGNED_FW)
+   if (SIGNED_FW_QX STREQUAL "" OR SIGNED_FW_QY STREQUAL "")
+     message(FATAL_ERROR "SIGNED_FW requires SIGNED_FW_QX and SIGNED_FW_QY to be set")
+@@ -313,8 +317,15 @@ endif()
+ #----------------------------------
+ # Get UF2 version from git
+ #----------------------------------
+-execute_process(COMMAND git describe --dirty --always --tags OUTPUT_VARIABLE GIT_VERSION)
++execute_process(
++  COMMAND git describe --dirty --always --tags
++  WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
++  OUTPUT_VARIABLE GIT_VERSION
++)
+ string(STRIP ${GIT_VERSION} GIT_VERSION)
++if (BOARD STREQUAL "apex_dongle_wl" AND DEFINED DONGLE_BUILD_ID)
++  string(APPEND GIT_VERSION "-dongle-${DONGLE_BUILD_ID}")
++endif ()
+ 
+ # Extract semantic version numbers (MAJOR.MINOR.PATCH) from GIT_VERSION.
+ # Supports tags like:
+diff --git a/cmake/toolchain/arm_gcc.cmake b/cmake/toolchain/arm_gcc.cmake
+index d11826c..b6fd444 100644
+--- a/cmake/toolchain/arm_gcc.cmake
++++ b/cmake/toolchain/arm_gcc.cmake
+@@ -1,8 +1,24 @@
+ set(CMAKE_SYSTEM_NAME Generic)
+ 
+-set(CMAKE_C_COMPILER "arm-none-eabi-gcc")
+-set(CMAKE_CXX_COMPILER "arm-none-eabi-g++")
+-set(CMAKE_ASM_COMPILER "arm-none-eabi-gcc")
++if(NOT DEFINED ZEPHYR_SDK_INSTALL_DIR)
++  if(DEFINED ENV{ZEPHYR_SDK_INSTALL_DIR})
++    set(ZEPHYR_SDK_INSTALL_DIR "$ENV{ZEPHYR_SDK_INSTALL_DIR}")
++  else()
++    message(FATAL_ERROR "Set ZEPHYR_SDK_INSTALL_DIR to a Zephyr SDK installation")
++  endif()
++endif()
++
++set(ZEPHYR_ARM_BIN "${ZEPHYR_SDK_INSTALL_DIR}/arm-zephyr-eabi/bin")
++if(WIN32)
++  set(APEX_TOOL_SUFFIX ".exe")
++else()
++  set(APEX_TOOL_SUFFIX "")
++endif()
++set(CMAKE_C_COMPILER   "${ZEPHYR_ARM_BIN}/arm-zephyr-eabi-gcc${APEX_TOOL_SUFFIX}")
++set(CMAKE_CXX_COMPILER "${ZEPHYR_ARM_BIN}/arm-zephyr-eabi-g++${APEX_TOOL_SUFFIX}")
++set(CMAKE_ASM_COMPILER "${ZEPHYR_ARM_BIN}/arm-zephyr-eabi-gcc${APEX_TOOL_SUFFIX}")
++set(CMAKE_OBJCOPY      "${ZEPHYR_ARM_BIN}/arm-zephyr-eabi-objcopy${APEX_TOOL_SUFFIX}" CACHE FILEPATH "objcopy")
++set(CMAKE_SIZE         "${ZEPHYR_ARM_BIN}/arm-zephyr-eabi-size${APEX_TOOL_SUFFIX}" CACHE FILEPATH "size")
+ set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+ 
+ set_property(GLOBAL PROPERTY TARGET_SUPPORTS_SHARED_LIBS FALSE)
+diff --git a/lib/sdk11/components/libraries/bootloader_dfu/bootloader_util.c b/lib/sdk11/components/libraries/bootloader_dfu/bootloader_util.c
+index a1fb9be..ce9ad6c 100644
+--- a/lib/sdk11/components/libraries/bootloader_dfu/bootloader_util.c
++++ b/lib/sdk11/components/libraries/bootloader_dfu/bootloader_util.c
+@@ -95,6 +95,13 @@ static inline void bootloader_util_reset(uint32_t start_addr)
+         "cmp   r5, #0x00\t\n"           // Compare, if 0 then we are in thread mode and can continue to reset handler of bootloader.
+         "bne   isr_abort\t\n"           // If not zero we need to exit current ISR and jump to reset handler of bootloader.
+ 
++        "cpsid i\t\n"                   // APEX: jump to the app with IRQs MASKED. This
++                                        // bootloader runs USB in DFU mode and, with the
++                                        // MBR forwarding IRQs to the app, a still-
++                                        // pending POWER/USBD event would otherwise fire
++                                        // into the app during its early SystemInit -
++                                        // before Zephyr sets VTOR / inits nrfx - and
++                                        // crash. Zephyr re-enables IRQs once it is ready.
+         "mov   lr, r4\t\n"              // Clear the link register and set to ones to ensure no return.
+         "bx    r0\t\n"                  // Branch to reset handler of bootloader.
+ 
+diff --git a/src/boards/boards.c b/src/boards/boards.c
+index c02a278..2e9cf76 100644
+--- a/src/boards/boards.c
++++ b/src/boards/boards.c
+@@ -377,6 +377,7 @@ static uint32_t secondary_cycle_length;
+ #endif
+ 
+ void led_tick(void) {
++#if LEDS_NUMBER > 0
+   uint32_t millis = _systick_count;
+ 
+   uint32_t cycle = millis % primary_cycle_length;
+@@ -402,6 +403,7 @@ void led_tick(void) {
+   #endif
+   led_pwm_duty_cycle(LED_SECONDARY, duty_cycle);
+   #endif
++#endif
+ }
+ 
+ static uint32_t rgb_color;
+diff --git a/src/dfu_init.c b/src/dfu_init.c
+index 612fed9..4a9b011 100644
+--- a/src/dfu_init.c
++++ b/src/dfu_init.c
+@@ -71,7 +71,9 @@
+ #include <stdint.h>
+ #include <string.h>
+ #include <dfu_types.h>
+-#include "nrf_error.h"
++#include "nrf_error.h"
++#include "boards.h"
++#include <stddef.h>
+ 
+ #ifndef SIGNED_FW
+ #include "crc16.h"
+@@ -174,18 +176,19 @@ uint32_t dfu_init_prevalidate(uint8_t * p_init_data, uint32_t init_data_len, uin
+ 	// Current template uses clear text data so they can be casted for pre-check.
+ 	dfu_init_packet_t * p_init_packet = (dfu_init_packet_t *)p_init_data;
+ 
+-	m_extended_packet_length = ((uint32_t)p_init_data + init_data_len) -
+-							   (uint32_t)&p_init_packet->softdevice[p_init_packet->softdevice_len];
+-	if (m_extended_packet_length < DFU_INIT_PACKET_EXT_LENGTH_MIN)
+-	{
+-		return NRF_ERROR_INVALID_LENGTH;
+-	}
+-
+-	if (((uint32_t)p_init_data + init_data_len) < 
+-		(uint32_t)&p_init_packet->softdevice[p_init_packet->softdevice_len])
+-	{
+-		return NRF_ERROR_INVALID_LENGTH;
+-	}
++	uint32_t const extension_offset = offsetof(dfu_init_packet_t, softdevice) +
++	                                 (uint32_t)p_init_packet->softdevice_len * sizeof(uint16_t);
++	if (extension_offset > init_data_len)
++	{
++		return NRF_ERROR_INVALID_LENGTH;
++	}
++	uint32_t const extension_length = init_data_len - extension_offset;
++	if (extension_length < DFU_INIT_PACKET_EXT_LENGTH_MIN ||
++	    extension_length > sizeof(m_extended_packet))
++	{
++		return NRF_ERROR_INVALID_LENGTH;
++	}
++	m_extended_packet_length = (uint8_t)extension_length;
+ 
+ 	memcpy(m_extended_packet,
+ 		   &p_init_packet->softdevice[p_init_packet->softdevice_len],
+@@ -213,10 +216,17 @@ uint32_t dfu_init_prevalidate(uint8_t * p_init_data, uint32_t init_data_len, uin
+ 	// if ((DFU_DEVICE_INFO->device_rev != DFU_DEVICE_REVISION_EMPTY) &&
+ 	//    (p_init_packet->device_rev != DFU_DEVICE_INFO->device_rev))
+ 
+-	if ( p_init_packet->device_type != ADAFRUIT_DEVICE_TYPE )
++	if ( p_init_packet->device_type != ADAFRUIT_DEVICE_TYPE )
+ 	{
+-		return NRF_ERROR_FORBIDDEN;
+-	}
++		return NRF_ERROR_FORBIDDEN;
++	}
++
++#ifdef BOARD_DFU_DEVICE_REV
++	if (p_init_packet->device_rev != BOARD_DFU_DEVICE_REV)
++	{
++		return NRF_ERROR_FORBIDDEN;
++	}
++#else
+ 
+ 	// Adafruit unlock code must match to upgrade SoftDevice and/or Bootloader
+ 	if ( image_type & (DFU_UPDATE_SD | DFU_UPDATE_BL) )
+@@ -224,8 +234,9 @@ uint32_t dfu_init_prevalidate(uint8_t * p_init_data, uint32_t init_data_len, uin
+ 	  if (p_init_packet->device_rev != ADAFRUIT_DEV_REV)
+ 	  {
+ 		return NRF_ERROR_FORBIDDEN;
+-	  }
+-	}
++	  }
++	}
++#endif
+ 
+ 	// Third check: Check the array of supported SoftDevices by this application.
+ 	//              If the installed SoftDevice does not match any SoftDevice in the list then an
+diff --git a/src/main.c b/src/main.c
+index c988ee4..a924a43 100644
+--- a/src/main.c
++++ b/src/main.c
+@@ -252,11 +252,23 @@ static void check_dfu_mode(void) {
+   bool const uf2_dfu         = (gpregret == DFU_MAGIC_UF2_RESET);
+   bool const dfu_skip        = (gpregret == DFU_MAGIC_SKIP);
+ 
++#ifdef BOARD_USB_RECOVERY_WINDOW_MS
++  /* A failed application must not bypass recovery with a stale skip request.
++   * A fatal handler requests UF2 explicitly; a hung application trips WDT. */
++  bool const recovery_reset = (NRF_POWER->RESETREAS & POWER_RESETREAS_DOG_Msk) != 0;
++  /* Consume this reset once. Otherwise the reset following a successful DFU
++   * would inherit DOG and never give the replacement application a chance. */
++  if (recovery_reset) NRF_POWER->RESETREAS = POWER_RESETREAS_DOG_Msk;
++#endif
++
+   bool const reason_reset_pin = (NRF_POWER->RESETREAS & POWER_RESETREAS_RESETPIN_Msk) ? true : false;
+ 
+   // start either serial, uf2 or ble
+   bool dfu_start = _ota_dfu || serial_only_dfu || uf2_dfu ||
+                    (((*dbl_reset_mem) == DFU_DBL_RESET_MAGIC) && reason_reset_pin);
++#ifdef BOARD_USB_RECOVERY_WINDOW_MS
++  dfu_start = dfu_start || recovery_reset;
++#endif
+ 
+   // Clear GPREGRET if it is our values
+   if (dfu_start || dfu_skip) {
+@@ -265,7 +277,11 @@ static void check_dfu_mode(void) {
+ 
+   // skip dfu entirely
+   if (dfu_skip) {
++#ifdef BOARD_USB_RECOVERY_WINDOW_MS
++    if (!recovery_reset && NRF_POWER->RESETREAS != 0) return;
++#else
+     return;
++#endif
+   }
+ 
+   /*------------- Determine DFU mode (Serial, OTA, FRESET or normal) -------------*/
+@@ -298,7 +314,13 @@ static void check_dfu_mode(void) {
+ 
+   // App mode: Double Reset detection or DFU startup for nrf52832
+   if (!(just_start_app || dfu_start || !valid_app)) {
+-#ifdef NRF52832_XXAA
++#ifdef BOARD_USB_RECOVERY_WINDOW_MS
++    /* Enumeration alone must not hold a buttonless receiver in its bootloader.
++     * Opening CDC with DTR or starting an update keeps this session open. */
++    usb_init(false);
++    bootloader_dfu_start(false, BOARD_USB_RECOVERY_WINDOW_MS, false);
++    usb_teardown();
++#elif defined(NRF52832_XXAA)
+     /* Even DFU is not active, we still force an 1000 ms dfu serial mode when startup
+      * to support auto programming from Arduino IDE
+      * Note: Double Reset WONT work with nrf52832 since all its SRAM got cleared with GPIO reset. */
+@@ -321,6 +343,11 @@ static void check_dfu_mode(void) {
+     (*dbl_reset_mem) = 0;
+   }
+ 
++  // A USB-only board must also handle an inherited BLE DFU request over USB.
++#ifdef BOARD_USB_DFU_ONLY
++  _ota_dfu = false;
++#endif
++
+   // Enter DFU mode accordingly to input
+   if (dfu_start || !valid_app) {
+     if (_ota_dfu) {
+@@ -335,8 +362,12 @@ static void check_dfu_mode(void) {
+ 
+     // Initiate an update of the firmware.
+     if (APP_ASKS_FOR_SINGLE_TAP_RESET() || uf2_dfu || serial_only_dfu) {
++#ifdef BOARD_USB_RECOVERY_WINDOW_MS
++      bootloader_dfu_start(false, 0, false);
++#else
+       // If USB is not enumerated in 3s (eg. because we're running on battery), we restart into app.
+       bootloader_dfu_start(_ota_dfu, 3000, true);
++#endif
+     } else {
+       // No timeout if bootloader requires user action (double-reset).
+       bootloader_dfu_start(_ota_dfu, 0, false);
+diff --git a/src/usb/uf2/ghostfat.c b/src/usb/uf2/ghostfat.c
+index 97753ef..91f27ff 100644
+--- a/src/usb/uf2/ghostfat.c
++++ b/src/usb/uf2/ghostfat.c
+@@ -417,7 +417,9 @@ int write_block (uint32_t block_no, uint8_t *data, WriteState *state)
+   {
+ 
+     case CFG_UF2_BOARD_APP_ID:  // board-specific app
++#ifndef BOARD_UF2_APP_ID_ONLY
+     case CFG_UF2_FAMILY_APP_ID: // family app
++#endif
+       /* Upgrading Application
+        *
+        * SoftDevice is considered as part of application and can be (or not) included in uf2.
+@@ -438,8 +440,25 @@ int write_block (uint32_t block_no, uint8_t *data, WriteState *state)
+        */
+       if ( in_app_space(bl->targetAddr) )
+       {
+-        PRINTF("Write addr = 0x%08lX, block = %ld (%ld of %ld)\r\n", bl->targetAddr, bl->blockNo, state->numWritten, bl->numBlocks);
+-        flash_nrf5x_write(bl->targetAddr, bl->data, bl->payloadSize, true);
++#ifdef APEX_APP_FLASH_START
++        /* Anti-brick: in_app_space() begins at the MBR boundary, but a board
++         * may place its application later. Silently skip blocks below that
++         * board-defined floor. Bootloader self-update families use separate
++         * switch cases and are unaffected. */
++        if ( bl->targetAddr < APEX_APP_FLASH_START )
++        {
++          PRINTF("APEX: skip UF2 write below app start (0x%08lX)\r\n", bl->targetAddr);
++        }
++        else
++#endif
++        {
++          PRINTF("Write addr = 0x%08lX, block = %ld (%ld of %ld)\r\n", bl->targetAddr, bl->blockNo, state->numWritten, bl->numBlocks);
++          flash_nrf5x_write(bl->targetAddr, bl->data, bl->payloadSize, true);
++#ifdef BOARD_HAS_RGB_DFU
++          extern void board_rgb_progress(uint32_t num, uint32_t den);
++          board_rgb_progress(bl->blockNo + 1u, bl->numBlocks);
++#endif
++        }
+       }else if ( bl->targetAddr < USER_FLASH_START )
+       {
+         // do nothing if writing to MBR, occurs when SD hex is included
+diff --git a/src/usb/usb.c b/src/usb/usb.c
+index b89e9e9..e61bde4 100644
+--- a/src/usb/usb.c
++++ b/src/usb/usb.c
+@@ -122,3 +122,11 @@ void tud_mount_cb(void) {
+ void tud_umount_cb(void) {
+   led_state(STATE_USB_UNMOUNTED);
+ }
++
++#ifdef BOARD_USB_RECOVERY_WINDOW_MS
++void tud_cdc_line_state_cb(uint8_t itf, bool dtr, bool rts) {
++  (void) itf;
++  (void) rts;
++  if (dtr) bootloader_dfu_activity_mark();
++}
++#endif
+

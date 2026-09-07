@@ -15,12 +15,18 @@ The receiver needs our Adafruit-based bootloader, which exposes an
 **APEXDONGLE** USB drive. This is separate from the keyboard's **APEXBOOT** drive.
 Do not use keyboard firmware or the keyboard USB installer on the receiver.
 
-Installing the custom receiver bootloader through the stock USB updater worked
-on the development dongle without SWD. That installer and the reviewed
-bootloader build are still local development files, not included in this repo
-or the release downloads. The provisional `bootloader/apex_dongle_wl` files
-are not the installed port. If your dongle still runs stock firmware, stop here;
-the instructions below update an already-converted receiver.
+For a stock receiver, follow [Install the receiver firmware](INSTALL.md).
+One command downloads and extracts the official firmware without installing GG,
+saves a backup, converts the bootloader and installs the receiver application.
+The original conversion worked over USB without SWD. The combined command has
+not yet been tested end to end on an untouched stock receiver.
+
+Ready-to-flash files are available under **Build keyboard and receiver** in
+[GitHub Actions](https://github.com/Ripthulhu/steelseries-apex-pro-mini-wl-zmk/actions/workflows/radio.yml).
+Choose a successful run and download both `apex-dongle` and
+`apex-keyboard-radio` from that same run. GitHub requires a login for these
+development downloads. Tagged releases also publish the receiver ZIP and a
+separate `apex-keyboard-radio.uf2`; the normal keyboard UF2 is a different build.
 
 ## Build both applications
 
@@ -39,6 +45,16 @@ The command prints an artifact directory containing `apex-receiver.uf2`, its
 exact configuration, ELF/HEX files, build log and `build.json` with SHA-256
 hashes. It does not flash anything. Omitting `--radio-input` builds a USB console
 without keyboard input.
+
+To also build the recovery bootloader and stock installer ZIP:
+
+```sh
+python tools/build_dongle_bundle.py --workspace ../work/zmk-upstream --output ../work/apex-dongle-bundle
+```
+
+This produces `../work/apex-dongle-bundle/apex-dongle.zip`. The build does not
+need GG or the stock firmware: it packages patches which the installer applies
+to the separately downloaded, hash-checked stock image.
 
 Keyboard (one command):
 
@@ -125,8 +141,8 @@ dongle mode restarts the keyboard to hand over the Nordic radio peripheral.
 
 ## Recover an unresponsive receiver
 
-The receiver has no button. The reviewed recovery bootloader offers a two-second
-USB window at power-on; the original provisional loader does not support this.
+The receiver has no button. Its recovery bootloader offers a two-second
+USB window at power-on.
 With pyserial installed, run:
 
 ```sh
@@ -154,16 +170,15 @@ cancelled transfers are retried; `dongle hid_status` counts them as
 encrypted packet counters. A new session discards old transitions and sends the
 current state. Replies carry host lock-key LED state back to ZMK.
 
-A successful USB completion wakes the radio thread to acknowledge that report
-without waiting for a retransmission. The reply still waits for a permitted
-hopping window. `dongle radio_test` reports `completion_tx` and the maximum
-USB-completion-to-ACK-transmission time; `dongle hid_status` reports the maximum
-USB submission-to-completion time. These are separate intervals, not measurements
-from physical keypress to application response.
+Replies distinguish reports accepted into the receiver queue from reports
+actually completed over USB. Up to three reports share one radio packet when
+input is queued. USB completions are reported in the next solicited reply;
+unsolicited completion replies are not used. See the [protocol notes](../radio/README.md)
+for the delivery format and timing counters.
 
-The first submission waits for USB completion before replying; if the keyboard
-retries while USB is still busy, the receiver replies with the last delivered
-sequence to keep the link alive without dropping the pending report.
+Recent sustained tests delivered 889–954 reports per second through radio and
+997–999 through USB alone. All 9,000 reports in the latest radio batch completed.
+These are throughput tests, not measurements from physical keypress to application.
 
 On battery, dongle mode now shares the keyboard's Bluetooth idle policy: scanner
 periods of 50 ms after five seconds and 255 ms after a minute, plus RGB shutdown
@@ -179,8 +194,8 @@ dongle mode, passed hardware tests with a shortened 60-second timeout. The full
 15-minute wait and current consumption have not yet been measured. The middle
 USB switch position is not a guaranteed wake source.
 
-The current schedule uses 20 ms channel slots and a 5 ms input retry interval
-inside guarded transmit windows. It is not the planned 1 kHz scheduler, and
+The current schedule uses 20 ms channel slots, 1.5 ms input retries and 5 ms
+idle keepalives inside guarded transmit windows. It is not a proven 1 kHz link, and
 input latency and battery life have not been measured. An early clock timeout
 recovered automatically but remains unexplained. See the
 [protocol notes](../radio/README.md) for timing, tests and diagnostics.
@@ -198,6 +213,12 @@ dongle dfu          Restart into APEXDONGLE
 `dongle hid_test_hold` is a test command: it stalls USB report submission for
 500 ms and restarts the radio session. `dongle crypto_test` checks encryption
 locally. Neither measures end-to-end input latency.
+
+`dongle hid_bench` sends 1,000 empty keyboard reports through USB and measures
+completion rate without radio traffic. Use it with the keyboard connected
+directly over USB: it briefly pauses the radio link and releases held input.
+The link reconnects when the test finishes. This isolates USB throughput;
+it does not measure wireless throughput or keypress latency.
 
 The older `--radio-probe` build is a fixed-channel, keepalive-only experiment.
 It requires `g4b_radio_probe.conf` on the keyboard and does not carry keypresses.

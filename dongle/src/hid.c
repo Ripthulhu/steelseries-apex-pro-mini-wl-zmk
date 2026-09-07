@@ -37,6 +37,24 @@ static uint32_t completed[2], releases, submit_errors, transfer_errors;
 static uint16_t last_media_usage;
 static uint32_t submitted_at, delivered_at, usb_max_us;
 static struct apex_latency usb_latency;
+static struct apex_latency usb_interval;
+static uint32_t last_usb_at, last_usb_generation;
+static bool have_usb_completion;
+static struct apex_delivery_rx delivery;
+static K_SEM_DEFINE(hid_event, 0, 1);
+
+void receiver_hid_wait(void)
+{
+    /* Retry temporary submission failures even if USB produces no callback. */
+    k_sem_take(&hid_event, K_MSEC(1));
+}
+
+void apex_radio_delivery_status(struct apex_delivery_ack *ack)
+{
+    k_spinlock_key_t key = k_spin_lock(&lock);
+    apex_delivery_status(&delivery, atomic_get(&leds), ack);
+    k_spin_unlock(&lock, key);
+}
 
 uint32_t apex_radio_completed(uint32_t *completed_at)
 {
@@ -53,10 +71,12 @@ void apex_radio_release(void)
     generation++;
     releases++;
     delivered_sequence = 0;
+    apex_delivery_rx_reset(&delivery);
     release_mask = 3;
     memset(keyboard, 0, sizeof(keyboard));
     memset(consumer, 0, sizeof(consumer));
     k_spin_unlock(&lock, key);
+    k_sem_give(&hid_event);
 }
 
 uint8_t apex_radio_host_leds(void) { return atomic_get(&leds); }
@@ -68,6 +88,7 @@ static void iface_ready(const struct device *dev, bool is_ready)
     ready = is_ready;
     k_spin_unlock(&lock, key);
     apex_radio_release();
+    apex_radio_request_session();
 }
 
 static void report_done(const struct device *dev, const uint8_t *data, int status)
@@ -79,7 +100,13 @@ static void report_done(const struct device *dev, const uint8_t *data, int statu
     if (!status && busy && pending_generation == generation) {
         delivered_sequence = pending_sequence;
         if (pending_sequence) {
+            apex_delivery_complete(&delivery, pending_sequence);
             delivered_at = k_cycle_get_32();
+            if (have_usb_completion && last_usb_generation == pending_generation)
+                apex_latency_add(&usb_interval, k_cyc_to_us_floor32(delivered_at - last_usb_at));
+            last_usb_at = delivered_at;
+            last_usb_generation = pending_generation;
+            have_usb_completion = true;
             uint32_t elapsed = k_cyc_to_us_floor32(delivered_at - submitted_at);
             apex_latency_add(&usb_latency, elapsed);
             if (elapsed > usb_max_us) usb_max_us = elapsed;
@@ -93,6 +120,7 @@ static void report_done(const struct device *dev, const uint8_t *data, int statu
     }
     busy = false;
     k_spin_unlock(&lock, key);
+    k_sem_give(&hid_event);
     if (notify) apex_radio_delivery_notify();
 }
 
@@ -103,6 +131,7 @@ static void set_protocol(const struct device *dev, uint8_t value)
     protocol = value;
     k_spin_unlock(&lock, key);
     apex_radio_release();
+    apex_radio_request_session();
 }
 
 static int get_report(const struct device *dev, uint8_t type, uint8_t id,
@@ -141,9 +170,13 @@ static const struct hid_device_ops ops = {
     .get_report = get_report, .set_report = set_report, .set_protocol = set_protocol,
 };
 
-static int submit(uint32_t sequence, uint8_t type, const uint8_t *data)
+static int submit(uint32_t sequence, uint8_t type, const uint8_t *data, uint32_t expected_generation)
 {
     k_spinlock_key_t key = k_spin_lock(&lock);
+    if (expected_generation != generation) {
+        k_spin_unlock(&lock, key);
+        return -ECANCELED;
+    }
     if (k_uptime_get() < hold_until) {
         k_spin_unlock(&lock, key);
         return -EAGAIN;
@@ -158,8 +191,14 @@ static int submit(uint32_t sequence, uint8_t type, const uint8_t *data)
     }
     if (protocol == HID_PROTOCOL_BOOT && type == APEX_INPUT_CONSUMER) {
         if (!sequence) release_mask &= ~2u;
-        else delivered_sequence = sequence;
+        else {
+            delivered_sequence = sequence;
+            delivered_at = k_cycle_get_32();
+            apex_delivery_complete(&delivery, sequence);
+        }
         k_spin_unlock(&lock, key);
+        k_sem_give(&hid_event);
+        apex_radio_delivery_notify();
         return 0;
     }
     size_t n = apex_input_size(type), prefix = protocol == HID_PROTOCOL_BOOT ? 0 : 1;
@@ -184,7 +223,11 @@ static int submit(uint32_t sequence, uint8_t type, const uint8_t *data)
 
 int apex_radio_deliver(const struct apex_input_frame *frame)
 {
-    return submit(frame->sequence, frame->type, frame->data);
+    k_spinlock_key_t key = k_spin_lock(&lock);
+    int rc = apex_delivery_receive(&delivery, frame);
+    k_spin_unlock(&lock, key);
+    if (!rc) k_sem_give(&hid_event);
+    return rc == -2 ? -EAGAIN : rc < 0 ? -EINVAL : 0;
 }
 
 void receiver_hid_poll(void)
@@ -193,13 +236,57 @@ void receiver_hid_poll(void)
     k_spinlock_key_t key = k_spin_lock(&lock);
     uint8_t type = release_mask & 1 ? APEX_INPUT_KEYBOARD :
                    release_mask & 2 ? APEX_INPUT_CONSUMER : 0;
+    uint32_t current_generation = generation;
+    struct apex_input_frame frame;
+    bool queued = !type && apex_delivery_front(&delivery, &frame);
     k_spin_unlock(&lock, key);
-    if (type) (void)submit(0, type, zero);
+    if (type) (void)submit(0, type, zero, current_generation);
+    else if (queued) (void)submit(frame.sequence, frame.type, frame.data, current_generation);
 }
 
 int receiver_hid_init(void)
 {
     return hid_device_register(hid, descriptor, sizeof(descriptor), &ops);
+}
+
+int receiver_hid_benchmark(const struct shell *sh, size_t argc, char **argv)
+{
+    ARG_UNUSED(argc); ARG_UNUSED(argv);
+    if (!apex_radio_pause()) return -EBUSY;
+    apex_radio_release();
+    int rc = 0;
+    int64_t deadline = k_uptime_get() + 1000;
+    for (;;) {
+        k_spinlock_key_t key = k_spin_lock(&lock);
+        bool available = ready && !busy && !release_mask;
+        k_spin_unlock(&lock, key);
+        if (available) break;
+        if (k_uptime_get() >= deadline) { rc = -ETIMEDOUT; goto done; }
+        k_sleep(K_MSEC(1));
+    }
+    uint32_t sent = 0, complete = 0, started = k_cycle_get_32();
+    deadline = k_uptime_get() + 5000;
+    while (complete < 1000 && k_uptime_get() < deadline) {
+        while (sent < 1000) {
+            struct apex_input_frame frame = {.sequence = sent + 1, .type = APEX_INPUT_KEYBOARD};
+            int result = apex_radio_deliver(&frame);
+            if (result == -EAGAIN) break;
+            if (result) { rc = result; goto report; }
+            sent++;
+        }
+        uint32_t completed_at;
+        complete = apex_radio_completed(&completed_at);
+        if (complete < 1000) k_sleep(K_MSEC(1));
+    }
+    if (complete < 1000) rc = -ETIMEDOUT;
+report:;
+    uint32_t elapsed = k_cyc_to_us_floor32(k_cycle_get_32() - started);
+    shell_print(sh, "USB_BENCH sent=%u completed=%u elapsed_us=%u reports_per_s=%llu error=%d",
+                sent, complete, elapsed, elapsed ? (unsigned long long)complete * 1000000 / elapsed : 0, rc);
+done:
+    apex_radio_release();
+    apex_radio_resume();
+    return rc;
 }
 
 int receiver_hid_status(const struct shell *sh, size_t argc, char **argv)
@@ -212,6 +299,7 @@ int receiver_hid_status(const struct shell *sh, size_t argc, char **argv)
     uint32_t failed = transfer_errors;
     uint32_t usb_us = usb_max_us;
     struct apex_latency latency = usb_latency;
+    struct apex_latency interval = usb_interval;
     uint16_t usage = last_media_usage;
     k_spin_unlock(&lock, key);
     shell_print(sh, "HID ready=%u busy=%u protocol=%u release_pending=%u leds=%02lx",
@@ -227,6 +315,12 @@ int receiver_hid_status(const struct shell *sh, size_t argc, char **argv)
     shell_print(sh, "USB_COMPLETE buckets=%u,%u,%u,%u,%u,%u",
                 latency.buckets[0], latency.buckets[1], latency.buckets[2],
                 latency.buckets[3], latency.buckets[4], latency.buckets[5]);
+    shell_print(sh, "USB_INTERVAL count=%u min_us=%u max_us=%u total_us=%llu",
+                interval.count, interval.min_us, interval.max_us,
+                (unsigned long long)interval.total_us);
+    shell_print(sh, "USB_INTERVAL buckets=%u,%u,%u,%u,%u,%u",
+                interval.buckets[0], interval.buckets[1], interval.buckets[2],
+                interval.buckets[3], interval.buckets[4], interval.buckets[5]);
     return 0;
 }
 

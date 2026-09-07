@@ -13,7 +13,9 @@
 int receiver_usb_init(void);
 #if IS_ENABLED(CONFIG_APEX_RECEIVER_RADIO_INPUT)
 int receiver_hid_init(void);
+int receiver_hid_benchmark(const struct shell *sh, size_t argc, char **argv);
 void receiver_hid_poll(void);
+void receiver_hid_wait(void);
 int receiver_hid_status(const struct shell *sh, size_t argc, char **argv);
 int receiver_hid_test_hold(const struct shell *sh, size_t argc, char **argv);
 #endif
@@ -76,6 +78,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(dongle_commands,
 #endif
 #if IS_ENABLED(CONFIG_APEX_RECEIVER_RADIO_INPUT)
     SHELL_CMD_ARG(hid_status, NULL, "USB HID state and media report counters.", receiver_hid_status, 1, 0),
+    SHELL_CMD_ARG(hid_bench, NULL, "Pause radio and send 1000 empty USB reports.", receiver_hid_benchmark, 1, 0),
     SHELL_CMD_ARG(hid_test_hold, NULL, "Delay HID for 500 ms and restart the radio session.", receiver_hid_test_hold, 1, 0),
 #endif
     SHELL_CMD_ARG(pair_storage_init, NULL, "Initialize unreadable pairing pages; requires confirm.", receiver_pair_storage_init, 1, 1),
@@ -123,7 +126,7 @@ int main(void)
         }
 #if IS_ENABLED(CONFIG_APEX_RECEIVER_RADIO_INPUT)
         receiver_hid_poll();
-        k_sleep(K_MSEC(1));
+        receiver_hid_wait();
 #else
         k_sleep(K_MSEC(100));
 #endif

@@ -29,3 +29,14 @@ jobs:
           python apex-zmk-g4b/build_g4b.py --help
           python installer/build_migration.py --help
           python apex-zmk-slot/scripts/build.py --help
+          python tools/build_dongle.py --help
+          python tools/build_dongle_bundle.py --help
+          python -m unittest discover -s dongle/installer -p test_install.py -v
+      - name: Radio and USB queue regression tests
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          for test in radio/tests/test_*.py dongle/tests/test_*.py; do
+            case "$test" in *test_packet.py) continue;; esac
+            python "$test"
+          done

@@ -23,7 +23,14 @@ def main():
 #define atomic_set(p,v) (*(p) = (v))
 #define atomic_inc(p) (++*(p))
 static struct { uint32_t INTENCLR, EVENTS_TRIGGERED[16]; } egu;
-static struct { uint32_t INTENCLR; } radio;
+static struct { uint32_t INTENCLR, STATE; } radio;
+#define RADIO_STATE_STATE_Disabled 0
+static int tx_pending, tx_done;
+static int atomic_cas(int *p, int old, int value) {
+    if (*p != old) return 0;
+    *p = value; return 1;
+}
+static void radio_receive(void) { assert(0); }
 #define NRF_EGU3 (&egu)
 #define NRF_RADIO (&radio)
 static uint32_t rx_irq_cycle, rx_irq_pending, rx_interrupts;

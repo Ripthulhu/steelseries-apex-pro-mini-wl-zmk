@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
-#define APEX_INPUT_VERSION 1
+#define APEX_INPUT_VERSION 2
 #define APEX_INPUT_KEYBOARD 1
 #define APEX_INPUT_CONSUMER 2
 #define APEX_INPUT_KEYBOARD_SIZE 8

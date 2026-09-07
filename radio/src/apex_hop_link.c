@@ -128,13 +128,22 @@ bool apex_hop_link_input_window(const struct apex_hop_link *l, uint64_t now_us)
     if (!apex_hop_link_ready(l, now_us)) return false;
     uint32_t slot, phase;
     if (apex_hop_position(&l->clock, now_us, &slot, &phase)) return false;
-    /* Immediate packets need no scheduled TX lead. Keep 2 ms before hopping
-	 * for encryption, airtime and the reply. USB completion may arrive later. */
-    return phase >= 2000 && phase < 18000;
+    /* Allow RX ramp-up after the hop and finish the exchange before the next.
+     * USB completion is reported independently of radio acceptance. */
+    return phase >= APEX_INPUT_OPEN_US && phase < APEX_INPUT_CLOSE_US;
 }
 
 uint8_t apex_hop_discovery_channel(enum apex_role role, uint64_t elapsed_us)
 {
     static const uint8_t search[] = {74, 6, 50, 26};
     return search[(elapsed_us / (role == APEX_KEYBOARD ? 300000u : 40000u)) % 4];
+}
+
+bool apex_hop_link_reply_window(const struct apex_hop_link *l, uint64_t now_us)
+{
+    if (!apex_hop_link_ready(l, now_us)) return false;
+    uint32_t slot, phase;
+    if (apex_hop_position(&l->clock, now_us, &slot, &phase)) return false;
+    /* ACKs need only their own ramp-up and airtime, not another round trip. */
+    return phase >= APEX_INPUT_OPEN_US && phase < APEX_REPLY_CLOSE_US;
 }

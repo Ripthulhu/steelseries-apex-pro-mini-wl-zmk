@@ -16,6 +16,7 @@ def main():
     handler = source[start:source.index('\n#endif', start)]
     harness = r'''
 #include "apex_input.h"
+#include "apex_delivery.h"
 #include "apex_latency.h"
 #include <assert.h>
 #include <errno.h>
@@ -23,27 +24,32 @@ def main():
 #define APEX_PACKET_ACK 1
 #define APEX_PACKET_INPUT 2
 #define APEX_PACKET_KEEPALIVE 3
+#define APEX_PACKET_INPUT_BATCH 6
+#define APEX_PACKET_PAYLOAD_MAX 64
+#define BUILD_ASSERT(x) _Static_assert(x, #x)
 typedef int k_spinlock_key_t;
-static int local_role = 1, input_lock, input_acked, usb_waits, input_delivered;
-static int duplicate_reports, delivery_result = -EAGAIN;
-static int input_progress;
-static uint32_t pending_usb_sequence, rx_sequence, last_ack;
+static int local_role = 1, input_lock, input_acked, usb_waits;
+static int duplicate_reports, delivery_result = -EAGAIN, delivered_count, full_after = -1;
+static int input_progress, reply_pending;
+static uint32_t rx_sequence, last_ack;
+static struct apex_delivery_tx delivery_tx;
 static struct apex_input_queue input_queue;
 static struct apex_latency queue_latency;
 static uint32_t queued_at[APEX_INPUT_QUEUE_SIZE];
 static uint32_t k_cycle_get_32(void) { return 100; }
 static uint32_t k_cyc_to_us_floor32(uint32_t cycles) { return cycles; }
+static void input_trace_acked(uint32_t sequence, bool more) { (void)sequence; (void)more; }
 #define atomic_get(p) (*(p))
 #define atomic_set(p,v) (*(p) = (v))
 #define atomic_inc(p) (++*(p))
 static int k_spin_lock(int *p) { (void)p; return 0; }
 static void k_spin_unlock(int *p, int key) { (void)p; (void)key; }
-static uint32_t sys_get_le32(const uint8_t *p) {
-    return p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
-}
 static void apex_radio_update_leds(uint8_t value) { (void)value; }
 static int apex_radio_deliver(const struct apex_input_frame *f) {
-    (void)f; return delivery_result;
+    (void)f;
+    if (full_after >= 0 && delivered_count >= full_after) return -EAGAIN;
+    if (!delivery_result) delivered_count++;
+    return delivery_result;
 }
 static int input_ack(uint32_t sequence) { last_ack = sequence; return 6; }
 '''
@@ -53,27 +59,50 @@ int main(void) {
     uint8_t data[18];
     int n = apex_input_pack(&f, data, sizeof(data));
     assert(n > 0);
-    assert(input_packet(APEX_PACKET_INPUT, data, n) == 0);
-    assert(rx_sequence == 0 && pending_usb_sequence == 1);
-    /* A stalled USB endpoint still gets liveness replies on retries. */
+    assert(input_packet(APEX_PACKET_INPUT, data, n) == 6);
+    assert(rx_sequence == 0);
+    /* A full receiver still sends its current acceptance position. */
     assert(input_packet(APEX_PACKET_INPUT, data, n) == 6 && last_ack == 0);
     assert(input_packet(APEX_PACKET_INPUT, data, n) == 6 && last_ack == 0);
     delivery_result = 0;
     assert(input_packet(APEX_PACKET_INPUT, data, n) == 6 && last_ack == 1);
-    assert(rx_sequence == 1 && input_delivered == 1);
-    /* Lost completion ACKs are recovered without another USB submission. */
+    assert(rx_sequence == 1);
+    /* Lost acceptance ACKs do not enqueue the report twice. */
     delivery_result = -EIO;
     assert(input_packet(APEX_PACKET_INPUT, data, n) == 6 && last_ack == 1);
-    assert(duplicate_reports == 1 && input_delivered == 1);
+    assert(duplicate_reports == 1);
     f.sequence = 2; n = apex_input_pack(&f, data, sizeof(data));
     assert(input_packet(APEX_PACKET_INPUT, data, n) == -EIO);
     assert(rx_sequence == 1);
     delivery_result = -EAGAIN;
-    assert(input_packet(APEX_PACKET_INPUT, data, n) == 0);
+    assert(input_packet(APEX_PACKET_INPUT, data, n) == 6);
     assert(input_packet(APEX_PACKET_INPUT, data, n) == 6 && last_ack == 1);
+    struct apex_input_frame batch[3] = {{.sequence=2,.type=APEX_INPUT_KEYBOARD},
+        {.sequence=3,.type=APEX_INPUT_CONSUMER}, {.sequence=4,.type=APEX_INPUT_KEYBOARD}};
+    uint8_t packed[APEX_DELIVERY_BATCH_SIZE];
+    int bytes = apex_delivery_batch_pack(batch, 3, packed, sizeof(packed));
+    delivered_count = 0; delivery_result = 0; full_after = 2;
+    assert(input_packet(APEX_PACKET_INPUT_BATCH, packed, bytes) == 6);
+    assert(rx_sequence == 3 && delivered_count == 2 && last_ack == 3);
+    full_after = -1;
+    assert(input_packet(APEX_PACKET_INPUT_BATCH, packed, bytes) == 6);
+    assert(rx_sequence == 4 && delivered_count == 3 && last_ack == 4);
+    assert(input_packet(APEX_PACKET_INPUT_BATCH, packed, bytes) == 6);
+    assert(delivered_count == 3);
+    for (int len = 0; len < bytes; len++)
+        assert(input_packet(APEX_PACKET_INPUT_BATCH, packed, len) == -EINVAL);
+    assert(delivered_count == 3);
     local_role = APEX_KEYBOARD;
     apex_input_session(&input_queue);
-    uint8_t ack[6] = {APEX_INPUT_VERSION, 1, 0, 0, 0, 0};
+    apex_delivery_tx_reset(&delivery_tx);
+    delivery_tx.sent = 2;
+    uint8_t ack[APEX_DELIVERY_ACK_SIZE];
+    struct apex_delivery_ack status = {1, 0, 7, 0};
+    apex_delivery_ack_pack(&status, ack);
+    assert(input_packet(APEX_PACKET_ACK, ack, sizeof(ack)) == 0);
+    assert(input_progress == 1 && input_acked == 0 && input_queue.count == 2);
+    status.completed = 1; status.free = 8;
+    apex_delivery_ack_pack(&status, ack);
     assert(input_packet(APEX_PACKET_ACK, ack, sizeof(ack)) == 0);
     assert(input_progress == 1 && input_acked == 1 && input_queue.count == 1);
     assert(queue_latency.count == 1 && queue_latency.total_us == 100);
@@ -82,7 +111,8 @@ int main(void) {
     assert(input_progress == 0 && input_acked == 1 && input_queue.count == 1);
     assert(queue_latency.count == 1);
     queued_at[input_queue.head] = UINT32_MAX - 49;
-    ack[1] = 2;
+    status.accepted = status.completed = 2;
+    apex_delivery_ack_pack(&status, ack);
     assert(input_packet(APEX_PACKET_ACK, ack, sizeof(ack)) == 0);
     assert(queue_latency.count == 2 && queue_latency.total_us == 250);
     return 0;
@@ -94,7 +124,8 @@ int main(void) {
         binary = path / 'test.exe'
         subprocess.run([args.cc, '-std=c99', '-Wall', '-Wextra', '-Werror',
                         '-I', str(root / 'include'), str(path / 'test.c'),
-                        str(root / 'src/apex_input.c'), '-o', str(binary)], check=True)
+                        str(root / 'src/apex_input.c'), str(root / 'src/apex_delivery.c'),
+                        '-o', str(binary)], check=True)
         subprocess.run([str(binary)], check=True)
     print('Input reply tests passed')
 

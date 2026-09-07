@@ -1,0 +1,55 @@
+name: Build keyboard and receiver
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: radio-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  firmware:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      WORK_ROOT: /tmp/apex-radio-work
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+      - name: Prepare pinned dependencies
+        run: python tools/setup_workspace.py --work-root "$WORK_ROOT"
+      - name: Build receiver and stock USB installer
+        run: python tools/build_dongle_bundle.py --workspace "$WORK_ROOT/zmk-upstream" --output "$WORK_ROOT/dongle"
+      - name: Test bootloader and installer ARM code
+        run: |
+          "$WORK_ROOT/zmk-upstream/.venv/bin/python" -m pip install unicorn==2.1.4 cryptography
+          "$WORK_ROOT/zmk-upstream/.venv/bin/python" dongle/bootloader/test_bootloader_arm.py "$WORK_ROOT/dongle/apex-dongle"
+          "$WORK_ROOT/zmk-upstream/.venv/bin/python" dongle/installer/test_migration_arm.py "$WORK_ROOT/dongle/apex-dongle"
+          "$WORK_ROOT/zmk-upstream/.venv/bin/python" dongle/installer/test_migration_arm.py "$WORK_ROOT/dongle/apex-dongle" readback
+      - name: Build matching keyboard firmware
+        run: >-
+          python apex-zmk-g4b/build_g4b.py --stage 3 --usb-studio --kscan-ingest
+          --persistent --plain-image --wireless-idle --ab-rollback --shell
+          --extra-conf apex-zmk-g4b/g4b_shell_release.conf
+          --extra-conf apex-zmk-g4b/g4b_radio_input.conf --work-root "$WORK_ROOT"
+      - name: Test radio protocol
+        run: '"$WORK_ROOT/zmk-upstream/.venv/bin/python" radio/tests/test_packet.py --workspace "$WORK_ROOT/zmk-upstream" --output "$WORK_ROOT/radio-tests"'
+      - name: Upload receiver installer and firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: apex-dongle
+          path: /tmp/apex-radio-work/dongle/apex-dongle.zip
+          if-no-files-found: error
+      - name: Upload matching keyboard firmware and configuration
+        uses: actions/upload-artifact@v4
+        with:
+          name: apex-keyboard-radio
+          path: /tmp/apex-radio-work/artifacts-repo-apex-zmk-g4b-wireless-idle-ab-v2/*
+          if-no-files-found: error
