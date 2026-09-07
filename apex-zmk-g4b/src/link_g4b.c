@@ -1707,6 +1707,18 @@ struct g4b_switch_settings {
     uint8_t fx;
 };
 
+#if IS_ENABLED(CONFIG_APEX_G4B_GAMEPAD)
+/* Per-key gamepad analog calibration (learned resting min and bottom-out max for
+ * W, A, S, D) persisted to NVS so the full travel range survives a reboot rather
+ * than being re-learned by bottoming each key out every session. Packed as eight
+ * uint16: min[0..3] then max[0..3]. The snapshot/restore helpers live next to the
+ * calibration arrays further down; declared here so the save and load can reach
+ * them across the file's ordering. */
+#define G4B_GP_CAL_WORDS 8u
+static void g4b_gp_cal_snapshot(uint16_t out[G4B_GP_CAL_WORDS]);
+static void g4b_gp_cal_restore(const uint16_t in[G4B_GP_CAL_WORDS]);
+#endif
+
 static void g4b_settings_save_work(struct k_work *work);
 static K_WORK_DELAYABLE_DEFINE(g4b_settings_dwork, g4b_settings_save_work);
 
@@ -1728,6 +1740,14 @@ static void g4b_settings_save_work(struct k_work *work)
     ARG_UNUSED(work);
     (void)settings_save_one("apex/switch", &st, sizeof(st));
     (void)settings_save_one("apex/perkey", s3_perkey_tenths, sizeof(s3_perkey_tenths));
+#if IS_ENABLED(CONFIG_APEX_G4B_GAMEPAD)
+    {
+        uint16_t cal[G4B_GP_CAL_WORDS];
+
+        g4b_gp_cal_snapshot(cal);
+        (void)settings_save_one("apex/gpcal", cal, sizeof(cal));
+    }
+#endif
 #if IS_ENABLED(CONFIG_APEX_G4B_RGB)
     {
         uint8_t r, g, b;
@@ -1770,6 +1790,24 @@ static int g4b_settings_set(const char *name, size_t len,
         }
         return 0;
     }
+
+#if IS_ENABLED(CONFIG_APEX_G4B_GAMEPAD)
+    /* Restored per-key gamepad calibration (min[4] then max[4]). g4b_gp_cal_restore
+     * range-checks each pair and silently drops a bad one, leaving that key to
+     * re-learn live, so a torn or stale record can never wedge the axis. */
+    if (settings_name_steq(name, "gpcal", &next) && next == NULL) {
+        uint16_t cal[G4B_GP_CAL_WORDS];
+
+        if (len != sizeof(cal)) {
+            return -EINVAL;
+        }
+        if (read_cb(cb_arg, cal, sizeof(cal)) < 0) {
+            return -EIO;
+        }
+        g4b_gp_cal_restore(cal);
+        return 0;
+    }
+#endif
 
 #if IS_ENABLED(CONFIG_APEX_G4B_RGB)
     /* RGB tuning: {global current, scale R, scale G, scale B}. Raised as g4b
@@ -2910,6 +2948,7 @@ BUILD_ASSERT(G4B_A2_START + G4B_A2_COUNT <= 70u, "0xA2 start+count must fit 70 k
 
 #define G4B_A2_KEYS  4u
 #define G4B_A2_RING  11u
+#define G4B_GP_MIN_SPAN 1200u   /* below this a key is not trusted analog */
 
 static uint8_t s3_a2_tx[G4B_SPIM_FRAME];
 static uint8_t s3_a2_rx[G4B_SPIM_FRAME];
@@ -2992,6 +3031,14 @@ static void s3_analog_sample(void)
             if (s3_a2_max_pend[k] != 0u && vf >= s3_a2_max_cand[k]) {
                 s3_a2_max[k] = vf;
                 s3_a2_max_pend[k] = 0u;
+#if IS_ENABLED(CONFIG_SETTINGS) && IS_ENABLED(CONFIG_APEX_G4B_GAMEPAD)
+                /* Once the learned range crosses the trust threshold, persist it
+                 * (debounced 30 s) so this bottom-out is the last one needed for
+                 * this key - the full travel is restored on the next boot. */
+                if ((uint32_t)(s3_a2_max[k] - s3_a2_min[k]) >= G4B_GP_MIN_SPAN) {
+                    g4b_settings_mark_dirty();
+                }
+#endif
             } else {
                 s3_a2_max_cand[k] = vf;
                 s3_a2_max_pend[k] = 1u;
@@ -3030,8 +3077,6 @@ static void s3_analog_sample(void)
                                  * deeper max, so full press is consistent */
 #define G4B_GP_LOCK_HYST_PCT 3u  /* stay locked until the key lifts >3% of span,
                                   * so wiggling at the stop does not un-lock */
-#define G4B_GP_MIN_SPAN 1200u   /* below this a key is not trusted analog */
-
 /* 0..1024 fixed point. Returns -1 while the key has not yet been pressed far
  * enough to know its own range.
  */
@@ -3082,6 +3127,39 @@ static int32_t s3_gp_unit(uint32_t k)
     u = ((v - dz_lo) * 1024u) / (dz_hi - dz_lo);
     return (int32_t)(u > 1024u ? 1024u : u);
 }
+
+#if IS_ENABLED(CONFIG_SETTINGS)
+/* Copy the live per-key range into the NVS record: min[0..3] then max[0..3]. */
+static void g4b_gp_cal_snapshot(uint16_t out[G4B_GP_CAL_WORDS])
+{
+    for (uint32_t k = 0u; k < G4B_A2_KEYS; k++) {
+        out[k] = s3_a2_min[k];
+        out[G4B_A2_KEYS + k] = s3_a2_max[k];
+    }
+}
+
+/* Apply a restored range. Runs during the boot settings load, before the scanner
+ * thread starts, so there is no concurrent writer. Each pair must sit inside the
+ * valid sampling window and span at least the analog-trust threshold; a pair that
+ * fails is dropped and that key re-learns live, exactly as an uncalibrated key
+ * already does. The two-sample max debounce is reset so the very next deeper
+ * press can still ratchet the ceiling up from the restored value. */
+static void g4b_gp_cal_restore(const uint16_t in[G4B_GP_CAL_WORDS])
+{
+    for (uint32_t k = 0u; k < G4B_A2_KEYS; k++) {
+        uint16_t lo = in[k];
+        uint16_t hi = in[G4B_A2_KEYS + k];
+
+        if (lo >= G4B_A2_VALID_LO && hi <= G4B_A2_VALID_HI && hi > lo &&
+            (uint32_t)(hi - lo) >= G4B_GP_MIN_SPAN) {
+            s3_a2_min[k] = lo;
+            s3_a2_max[k] = hi;
+            s3_a2_max_cand[k] = 0u;
+            s3_a2_max_pend[k] = 0u;
+        }
+    }
+}
+#endif /* CONFIG_SETTINGS */
 
 /* A key whose range is not yet learned still has to do something sensible, and
  * the something is exactly what the keyboard does today: on or off from the
