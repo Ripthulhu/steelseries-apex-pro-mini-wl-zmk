@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Install the custom receiver through stock USB, with a two-pass backup first."""
 import argparse
+import errno
 import hashlib
 import json
 import os
@@ -129,7 +130,14 @@ def install_application(image, drive=None, timeout=60):
             with image.open('rb') as src, (destination / 'NEW.UF2').open('wb') as dst:
                 shutil.copyfileobj(src, dst)
                 dst.flush()
-                os.fsync(dst.fileno())
+                try:
+                    os.fsync(dst.fileno())
+                except OSError as error:
+                    if error.errno not in (errno.EBADF, errno.EIO, errno.ENODEV, errno.EINVAL):
+                        raise
+                    # UF2 completion resets the receiver and removes its drive.
+                    # main() must still confirm the expected application build.
+                    print('Receiver drive disconnected during sync; checking the application next.', flush=True)
             return
         time.sleep(.25)
     raise RuntimeError('APEXDONGLE did not mount. Do not repeat stock installation. Mount it and copy apex-receiver.uf2.')

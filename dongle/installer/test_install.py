@@ -1,5 +1,6 @@
 """Offline checks for the stock receiver installer; no USB access."""
 import hashlib
+import errno
 import json
 from pathlib import Path
 import struct
@@ -12,6 +13,21 @@ import install
 
 
 class InstallerTests(unittest.TestCase):
+    def test_drive_disappears_after_completed_copy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            drive = folder / 'drive'
+            drive.mkdir()
+            (drive / 'INFO_UF2.TXT').write_text(install.BOARD)
+            image = folder / 'image.uf2'
+            image.write_bytes(b'test image')
+            with patch.object(install.os, 'fsync', side_effect=OSError(errno.EBADF, 'device removed')):
+                install.install_application(image, drive)
+            self.assertEqual((drive / 'NEW.UF2').read_bytes(), image.read_bytes())
+            with patch.object(install.os, 'fsync', side_effect=OSError(errno.ENOSPC, 'disk full')):
+                with self.assertRaises(OSError):
+                    install.install_application(image, drive)
+
     def test_install_sequence_stops_before_bootloader_on_bad_backup(self):
         for bad_backup in (False, True):
             with self.subTest(bad_backup=bad_backup), tempfile.TemporaryDirectory() as tmp:

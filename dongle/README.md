@@ -5,8 +5,8 @@ Wireless. It receives keyboard and media reports from ZMK over an encrypted
 2.4 GHz link and forwards them over USB. The keymap stays on the keyboard.
 It does not use the SteelSeries protocol or pair through GG.
 
-This is development firmware. Published keyboard releases do not include this
-radio protocol; both devices need matching builds from this checkout. Gamepad
+This is development firmware. Both devices need matching radio builds; the
+normal keyboard release UF2 does not include this protocol. Gamepad
 output, Studio and wireless updates are not implemented on the receiver.
 
 ## Before flashing

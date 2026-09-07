@@ -5,8 +5,9 @@ The installer replaces its stock bootloader and application over USB. It then
 checks that the new receiver application starts. No compiler or GG installation
 is needed. Commands run on the computer the dongle is plugged into.
 
-The individual USB conversion, UF2 upload and recovery steps have worked on our
-development receiver. The combined installer has not yet been run end to end
+The individual USB conversion and recovery steps have worked on our development
+receiver. The installer's application upload and running-build check have also
+been tested on that receiver with the GitHub-built firmware. The combined installer has not yet been run end to end
 on an untouched stock receiver. Keep SWD recovery available: losing power while
 the bootloader is being replaced can leave the dongle unable to start over USB.
 
@@ -17,7 +18,9 @@ the bootloader is being replaced can leave the dongle unable to start over USB.
   On Ubuntu/Debian, install `7zip`; on macOS with Homebrew, install `sevenzip`.
 - Only one Apex dongle connected. Close GG if it happens to be running.
 
-Extract the ZIP and open a terminal in that folder. Create a Python environment:
+GitHub Actions wraps the download in an outer ZIP; extract the `apex-dongle.zip`
+inside it too. Release downloads contain just the installer ZIP. Open a terminal
+in the extracted folder containing `install.py`. Create a Python environment:
 
 ```sh
 python -m venv .venv
@@ -76,7 +79,7 @@ uses HID and the standard serial/mass-storage drivers.
 ## After installation
 
 Pair the dongle and keyboard over USB using `dongle.py pair`; the full steps
-are in the repository's [receiver guide](https://github.com/Ripthulhu/steelseries-apex-pro-mini-wl-zmk/blob/apex-scanner-bootloader/dongle/README.md#pair-over-usb).
+are in the repository's [receiver guide](https://github.com/Ripthulhu/steelseries-apex-pro-mini-wl-zmk/blob/main/dongle/README.md#pair-over-usb).
 Both devices need matching radio firmware. Stock GG pairing no longer applies.
 
 Future updates only need `apex-receiver.uf2`: enter `dongle dfu` in the receiver
