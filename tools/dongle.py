@@ -150,6 +150,8 @@ def main():
     update.add_argument('file', help='update-capable keyboard UF2')
     update.add_argument('--install', action='store_true', help='verify, install and restart after downloading')
     update.add_argument('--resume', action='store_true', help='continue a matching download if the keyboard has not restarted')
+    update.add_argument('--allow-legacy-status', action='store_true',
+                        help='development only: transfer to a binary-capable build that predates the bulk=1 status field')
     backup = commands.add_parser('backup', help='back up keyboard flash over its own USB shell')
     backup.add_argument('--keyboard-port', required=True)
     backup.add_argument('--output', required=True, help='new private backup directory')
@@ -166,7 +168,8 @@ def main():
     elif args.command == 'update':
         from wireless_update import update_keyboard
         try:
-            update_keyboard(args.dongle_port, args.file, install=args.install, resume=args.resume)
+            update_keyboard(args.dongle_port, args.file, install=args.install, resume=args.resume,
+                            require_bulk=not args.allow_legacy_status)
         except (OSError, ValueError, RuntimeError, serial.SerialException) as exc:
             parser.exit(1, str(exc) + '\n')
     elif args.command == 'pair':

@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include <zephyr/kernel.h>
+#include <zephyr/sys/atomic.h>
 
 #include <zmk/keymap.h>
 #include <zmk/rgb_underglow.h>
@@ -222,6 +223,59 @@ static inline void set_led(uint8_t *frame, uint8_t led,
     p[2] = r;
 }
 
+/* --- Wireless-update progress bar -----------------------------------------
+ * The download phase of a wireless update, shown as the same red->green,
+ * left->right key-matrix bar the bootloader draws while it flashes
+ * (board_rgb_progress in pinconfig.c). It takes over the whole matrix while a
+ * transfer is live and self-clears once progress stops arriving. */
+#define OTA_WINDOW_MS 1200u
+static atomic_t ota_received;
+static atomic_t ota_total;
+static atomic_t ota_last_ms;
+
+void g4b_rgb_overlay_update(uint32_t received, uint32_t total)
+{
+    if (total == 0u) {
+        return;
+    }
+    atomic_set(&ota_received, (atomic_val_t)received);
+    atomic_set(&ota_total, (atomic_val_t)total);
+    atomic_set(&ota_last_ms, (atomic_val_t)k_uptime_get_32());
+}
+
+static bool ota_active(uint32_t now)
+{
+    if ((uint32_t)atomic_get(&ota_total) == 0u) {
+        return false;
+    }
+    return (now - (uint32_t)atomic_get(&ota_last_ms)) < OTA_WINDOW_MS;
+}
+
+/* Full-matrix red fill by key X-position, whole board green at 100%. g4b_led_x
+ * is the app-side source the bootloader's apex_led_x[] mirrors, so the bar lines
+ * up across the transfer and flash phases. */
+static void paint_update(uint8_t *frame)
+{
+    uint32_t received = (uint32_t)atomic_get(&ota_received);
+    uint32_t total = (uint32_t)atomic_get(&ota_total);
+    uint32_t level = (total == 0u) ? 0u
+                   : (received >= total) ? 255u
+                   : (received * 255u) / total;
+
+    memset(&frame[2], 0, G4B_RGB_CHANNELS);
+    if (level >= 255u) {
+        for (uint32_t i = 0u; i < G4B_RGB_LEDS; i++) {
+            set_led(frame, (uint8_t)i, 0u, 255u, 0u);
+        }
+    } else {
+        for (uint32_t i = 0u; i < G4B_RGB_LEDS; i++) {
+            if (g4b_led_x[i] <= (uint8_t)level) {
+                set_led(frame, (uint8_t)i, 255u, 0u, 0u);
+            }
+        }
+    }
+}
+
 static bool toggle_on(uint8_t kind)
 {
     switch (kind) {
@@ -294,7 +348,8 @@ static bool any_flash_active(uint32_t now)
 
 bool g4b_rgb_overlay_wants(uint32_t now_ms)
 {
-    return zmk_keymap_layer_active(FN_LAYER) || any_flash_active(now_ms);
+    return ota_active(now_ms) || zmk_keymap_layer_active(FN_LAYER) ||
+           any_flash_active(now_ms);
 }
 
 /* Paint any active flashes into the frame; expire finished ones. */
@@ -332,6 +387,12 @@ static bool render_flashes(uint8_t *frame, uint32_t now)
 
 void g4b_rgb_overlay_apply(uint8_t *out_frame, uint32_t now_ms)
 {
+    /* A live wireless transfer owns the whole matrix; nothing else composites. */
+    if (ota_active(now_ms)) {
+        paint_update(out_frame);
+        return;
+    }
+
     bool fn = zmk_keymap_layer_active(FN_LAYER);
 
     if (fn) {

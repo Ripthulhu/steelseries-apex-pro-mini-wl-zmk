@@ -137,6 +137,8 @@ if __name__ == '__main__':
     HOOKS = {SYMBOLS[name] & ~1: name for name in (
         'nor_read', 'nor_close', 'update_nor_write', 'flash_nrf5x_erase',
         'flash_nrf5x_write', 'flash_nrf5x_flush')}
-    if 'update_nor_wait' in SYMBOLS:
-        HOOKS[SYMBOLS['update_nor_wait'] & ~1] = 'update_nor_wait'
+    # No-op the RGB install-progress bar (drives SPIM2 on real hardware).
+    for opt in ('update_nor_wait', 'board_rgb_progress'):
+        if opt in SYMBOLS:
+            HOOKS[SYMBOLS[opt] & ~1] = opt
     unittest.main(argv=['boot-update-tests'], verbosity=2)

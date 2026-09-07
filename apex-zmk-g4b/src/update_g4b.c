@@ -4,6 +4,12 @@
 #include "ab_rollback_g4b.h"
 #include "apex_control_g4b.h"
 #include "spinor_g4b.h"
+#if IS_ENABLED(CONFIG_APEX_G4B_FN_OVERLAY)
+#include "rgb_overlay_g4b.h" /* red->green transfer bar, twin of the DFU/install bar */
+#else
+static inline void g4b_rgb_overlay_update(uint32_t received, uint32_t total)
+{ (void)received; (void)total; }
+#endif
 #include <zephyr/settings/settings.h>
 #include <zephyr/shell/shell_uart.h>
 #include <zephyr/sys/reboot.h>
@@ -123,7 +129,9 @@ static int command(const struct shell *sh, size_t argc, char **argv)
         if (!number(argv[2], &length) || strlen(argv[3]) != 64 ||
             hex2bin(argv[3], 64, hash, sizeof(hash)) != sizeof(hash)) return -EINVAL;
         if (!power_ready()) return -EAGAIN;
-        return apx_update_begin(&io, &download, length, hash);
+        int rc = apx_update_begin(&io, &download, length, hash);
+        if (!rc) g4b_rgb_overlay_update(0, length); /* show the empty bar at once */
+        return rc;
     }
     if (argc == 4 && !strcmp(argv[1], "write")) {
         uint8_t data[32];
@@ -132,7 +140,9 @@ static int command(const struct shell *sh, size_t argc, char **argv)
         if (!number(argv[2], &offset) || !n || n > 64 || (n & 1) ||
             hex2bin(argv[3], n, data, sizeof(data)) != n / 2) return -EINVAL;
         if (!(offset % APX_UPDATE_SECTOR) && !power_ready()) return -EAGAIN;
-        return apx_update_write(&io, &download, offset, data, n / 2);
+        int rc = apx_update_write(&io, &download, offset, data, n / 2);
+        g4b_rgb_overlay_update(download.received, download.manifest.length);
+        return rc;
     }
     if (argc == 2 && !strcmp(argv[1], "commit")) {
         if (!power_ready()) return -EAGAIN;
@@ -177,6 +187,7 @@ int g4b_update_binary(uint32_t offset, const uint8_t *data, size_t length, uint3
         if (!(offset % APX_UPDATE_SECTOR) && !power_ready()) rc = -EAGAIN;
         else rc = apx_update_write(&io, &download, offset, data, length);
     }
+    g4b_rgb_overlay_update(download.received, download.manifest.length);
     *received = download.received;
     k_mutex_unlock(&update_mutex);
     return rc;

@@ -156,7 +156,7 @@ class UpdateClient:
         raise RuntimeError(f'Update {verb} reply was lost. The command was not retried; check keyboard update status.')
 
 
-def update_keyboard(port, path, *, install=False, resume=False):
+def update_keyboard(port, path, *, install=False, resume=False, require_bulk=True):
     image = read_image(path)
     digest = hashlib.sha256(image).hexdigest()
     print(f'Keyboard application: {len(image)} bytes, SHA-256 {digest}', flush=True)
@@ -168,8 +168,11 @@ def update_keyboard(port, path, *, install=False, resume=False):
         status, received = client.command('status')
         if not re.search(rb'layout=3 prepared=1 bootloader=1 ready=1', status):
             raise RuntimeError('Keyboard needs wired update preparation and a verified fallback first')
-        if b'bulk=1' not in status:
+        if require_bulk and b'bulk=1' not in status:
             raise RuntimeError('Keyboard needs firmware with binary update support; install it over USB first')
+        if not require_bulk and b'bulk=1' not in status:
+            print('Development override: proceeding without bulk=1 status. The running '
+                  'build must still support binary transfers.', flush=True)
         start = 0
         if resume:
             if (f'UPDATE sha256={digest}'.encode() not in status or

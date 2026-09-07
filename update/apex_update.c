@@ -3,6 +3,13 @@
 #include <string.h>
 #include <tinycrypt/sha256.h>
 
+/* Optional install-progress hook. The bootloader defines this (before including
+ * this file) to drive the same red->green key-matrix bar the DFU write path uses
+ * (board_rgb_progress). Portable builds and the tests leave it a no-op. */
+#ifndef APX_UPDATE_PROGRESS
+#define APX_UPDATE_PROGRESS(done, total) ((void)0)
+#endif
+
 _Static_assert(sizeof(struct apx_update_manifest) == 56, "update descriptor size");
 _Static_assert(APX_UPDATE_FIRST_SIZE + APX_UPDATE_SECOND_SIZE + APX_UPDATE_THIRD_SIZE ==
                APX_UPDATE_CAPACITY, "candidate capacity");
@@ -183,6 +190,7 @@ int apx_update_install(const struct apx_update_io *io)
     }
     if (set_state(io, APX_UPDATE_COPYING)) return -1;
     for (uint32_t page = 0; page < h.length; page += APX_UPDATE_SECTOR) {
+        APX_UPDATE_PROGRESS(page, h.length);
         uint32_t end = page + APX_UPDATE_SECTOR;
         if (end > h.length) end = h.length;
         bool same = true;
@@ -204,6 +212,7 @@ int apx_update_install(const struct apx_update_io *io)
     }
     if (verify_image(io, &h, true) || io->app_finish()) return -1;
     if (set_state(io, APX_UPDATE_TRIAL)) return -1;
+    APX_UPDATE_PROGRESS(h.length, h.length); /* full bar -> green: verified copy */
     return 1;
 }
 

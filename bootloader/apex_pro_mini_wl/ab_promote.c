@@ -19,7 +19,18 @@
 #include "nrf_gpio.h"
 #include "flash_nrf5x.h"
 #include "dfu_types.h"      /* BOOTLOADER_SETTINGS_ADDRESS, CODE_PAGE_SIZE */
+#include "boards.h"         /* BOARD_HAS_RGB_DFU */
 #include "ab_promote.h"
+
+#ifdef BOARD_HAS_RGB_DFU
+/* Show the internal-flash install copy on the key matrix using the same red->green
+ * left->right bar the UF2 DFU write path draws (board_rgb_progress in pinconfig.c),
+ * so a wireless install looks like a DFU flash. apx_update_install() calls this
+ * per page and once more at completion for the green confirmation. */
+extern void board_rgb_progress(uint32_t num, uint32_t den);
+#define APX_UPDATE_PROGRESS(done, total) board_rgb_progress((done), (total))
+#endif
+
 #include "apex_update.c"
 
 /* NOR layout; keep in sync with src/ab_rollback_g4b.c. */
@@ -236,6 +247,11 @@ static int update_app_read(uint32_t address, void *data, uint32_t size)
 {
     if (address < AB_APP_BASE || address > AB_APP_BASE + AB_APP_MAXLEN ||
         size > AB_APP_BASE + AB_APP_MAXLEN - address) return -1;
+    /* Commit any page still held in the write cache before reading internal
+     * flash. The copy compares and verifies through app_read, so this is what
+     * makes cached writes visible. flash_nrf5x_flush() is idempotent and a
+     * no-op once the cache is clean. */
+    flash_nrf5x_flush(false);
     memcpy(data, (const void *)address, size);
     return 0;
 }
@@ -244,9 +260,16 @@ static int update_app_write(uint32_t address, const void *data, uint32_t size)
     if (address < AB_APP_BASE || address > AB_APP_BASE + AB_APP_MAXLEN ||
         size > AB_APP_BASE + AB_APP_MAXLEN - address || (size & 3u)) return -1;
     update_watchdog();
+    /* Cache the write only. flash_nrf5x_write() programs a page just once, when
+     * the page address changes; the flush that commits the last-touched page
+     * happens in update_app_read (during compare/verify) and update_app_finish.
+     * Flushing here after every 256-byte write reprograms the whole 4 KiB page
+     * up to 16 times, exceeding the NVMC write-between-erase limit: the copy
+     * verifies immediately but does not retain across a reboot. Integrity is
+     * checked by verify_image() over the whole internal image before install
+     * completes, so a failed program still lands in fallback/wired recovery. */
     flash_nrf5x_write(address, data, size, false);
-    flash_nrf5x_flush(false);
-    return memcmp((const void *)address, data, size) ? -1 : 0;
+    return 0;
 }
 static int update_app_erase(uint32_t address, uint32_t size)
 {

@@ -34,4 +34,12 @@ bool g4b_rgb_overlay_wants(uint32_t now_ms);
  * (on=false). Called from the toggle behaviors; coalesces onto a small pool. */
 void g4b_rgb_overlay_flash(uint8_t hid, bool on);
 
+/* Report wireless-update download progress (received/total bytes). While a
+ * transfer is live this takes over the whole matrix with the same red->green
+ * left->right bar the bootloader's DFU/install path draws, so a wireless update
+ * looks the same whether it is transferring (here) or flashing (bootloader).
+ * Called from the update path; thread-safe. Passing total 0 is ignored. The
+ * indicator self-clears shortly after progress stops arriving. */
+void g4b_rgb_overlay_update(uint32_t received, uint32_t total);
+
 #endif /* APEX_G4B_RGB_OVERLAY_H */

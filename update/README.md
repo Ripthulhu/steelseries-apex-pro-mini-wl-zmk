@@ -1,27 +1,35 @@
 # Wireless keyboard updates
 
-**Experimental: changed-image installation failed on hardware. Do not use this
-as your normal update method yet.** Transfers work, but installation still needs
-investigation. Bootloader updates and emergency recovery need USB or SWD.
+**Experimental.** Changed-image installation now works on hardware, but the
+feature has had limited testing; keep a wired recovery path available.
+Bootloader updates and emergency recovery still need USB or SWD.
 
-## Hardware results — 7 September 2026
+## Hardware results
 
-- A complete 402,176-byte image transferred on battery in 98–107 seconds.
-  The earlier text-command transfer was abandoned because it took far too long.
-- Reinstalling the same image passed verification, reboot and boot-health checks.
-- A different image, changing 20 internal flash pages, transferred and verified,
-  but the keyboard subsequently reported the update rejected and returned to the
-  previous build. This was not merely a sleeping keyboard.
-- The latest crash record was #462: reason 35, PC `0x00000000`, LR `0x000207d9`,
-  CFSR/HFSR zero and RESETREAS `0x00000004`. Its cause is not established.
-  Mapping the LR to Bluetooth HCI code alone does not establish a Bluetooth bug.
+- A complete 402,176-byte image transfers on battery in about 100–120 seconds
+  (~3 KB/s over the radio). The earlier text-command transfer was abandoned
+  because it took far too long.
+- Reinstalling the same image, and installing a *different* image, both pass
+  verification, the internal copy, reboot and the keyboard's boot-health checks
+  (state HEALTHY). An earlier bootloader corrupted changed images during the
+  copy; see below.
+- Progress shows on the key matrix: a red bar fills left→right while an update
+  transfers and again while the bootloader copies it into internal flash, then
+  the whole board turns green when each step completes — the same indicator the
+  UF2 DFU path uses.
 
-The next investigation should distinguish a bad internal copy from an application
-startup failure. In particular, review the bootloader adapter's use of
-`flash_nrf5x_flush(false)`: that function writes a whole cached page, while the
-new adapter currently flushes after each 256-byte write. The emulator mocks this
-API and therefore does not exercise its real page-cache or NVMC behaviour.
-No physical interruption-during-install test has been completed.
+### The changed-image copy defect (fixed)
+
+An earlier bootloader flushed the Adafruit 4 KiB flash page cache after every
+256-byte write, so `flash_nrf5x_flush(false)` reprogrammed the whole page each
+time and each internal word was written up to sixteen times between erases —
+beyond the nRF52 write-between-erase limit. The copy verified immediately but
+did not retain across a reboot, so a changed image booted corrupt and was
+rejected. Reinstalling the *same* image hid the defect because the installer
+skips pages that already match. The installer now caches each page and programs
+every word exactly once; `update/test_bootloader_flash.py` models the real
+page-cache and NVMC write count and guards against a regression. No physical
+interruption-during-install test has been completed.
 
 ## One-time setup
 
@@ -148,7 +156,11 @@ not substitute for reset testing on hardware.
 python update/test_update.py --tinycrypt /path/to/zmk-upstream/modules/crypto/tinycrypt/lib
 python tools/test_wireless_update.py
 python update/test_bootloader.py /path/to/bootloader.elf
+python update/test_bootloader_flash.py /path/to/bootloader.elf
 ```
 
-The first test needs a native C compiler. The ARM test needs `unicorn` and
-`pyelftools` installed in Python.
+The first test needs a native C compiler. The ARM tests need `unicorn` and
+`pyelftools` installed in Python. `test_bootloader_flash.py` runs the real
+Adafruit page-cache code against a flash model that enforces the 1→0 program
+rule and counts writes per word between erases, so it exercises the install copy
+the mocked `test_bootloader.py` cannot.

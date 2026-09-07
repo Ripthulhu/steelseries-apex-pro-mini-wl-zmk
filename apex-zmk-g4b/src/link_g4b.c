@@ -1655,9 +1655,13 @@ static void s3_rgb_idle_update(void)
 #endif
 
     uint32_t now = k_uptime_get_32();
+    /* A wireless firmware transfer is not key ingest, so keep the matrix awake
+     * while one runs - otherwise the idle fade would hide the update progress
+     * bar partway through a transfer with no typing. */
+    extern bool g4b_update_busy(void);
     /* Wireless modes share the fade and rail shutdown. A selected USB data
      * connection keeps lighting active; a charge-only cable does not. */
-    bool want_on = !g4b_mode_is_wireless() || usb_selected ||
+    bool want_on = !g4b_mode_is_wireless() || usb_selected || g4b_update_busy() ||
                    (now - s3_last_activity_ms) < (uint32_t)CONFIG_APEX_G4B_RGB_IDLE_MS;
 
     g4b_rgb_idle_tick(want_on, now);
