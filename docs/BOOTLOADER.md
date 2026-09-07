@@ -67,7 +67,7 @@ These entry methods have been tested on the first-generation board. See
 
 | Method | How |
 |--------|-----|
-| **Keymap combo** | Hold `Fn`, then press `Right Ctrl` and `Esc` — a custom `apex_dfu` ZMK behavior |
+| **Keymap combo** | Hold `Fn`, then press `Right Ctrl` and `Esc` (the custom `apex_dfu` ZMK behavior) |
 | **USB magic string** | Host writes `APEXDFU!` to the dedicated DFU CDC port |
 | **USB 1200-baud touch** | Open the DFU CDC and switch it to 1200 baud (works with `adafruit-nrfutil` / Arduino-style tools) |
 | **Double-tap reset** | Briefly short CN3 `RESET` to `GND` twice |
@@ -77,13 +77,13 @@ While the board is in DFU, the per-key RGB matrix is the only usable indicator
 (there is no discrete LED), so it shows DFU state directly:
 
 - **Idle (drive mounted):** a **breathing red background** across every key with
-  the **`D`, `F`, `U` keycaps held solid green** on top — their printed legends
+  the **`D`, `F`, `U` keycaps held solid green** on top, their printed legends
   read "DFU". The breathe is animated from `led_tick()` (the SysTick handler, the
   lowest IRQ priority, so its short SPIM write cannot stall USB); `board_rgb_dfu_tick()`
   redraws at ~30 fps over a 2.6 s fade period. (Block-letter glyphs drawn across
-  the keys were tried first and are illegible — the staggered layout and the caps'
+  the keys were tried first and are illegible. The staggered layout and the caps'
   own legends break the letterforms.)
-- **Writing:** a **red bar fills left→right** across the whole board, tracking the
+- **Writing:** a **red bar fills left to right** across the whole board, tracking the
   UF2 write progress (each written block advances the fill by the LED's horizontal
   position; see `apex_led_x[]` in `pinconfig.c`, mirrored from `rgb_map_g4b.c`).
 - **Done:** the **whole board turns green** on the final block (and on
@@ -91,7 +91,7 @@ While the board is in DFU, the per-key RGB matrix is the only usable indicator
 - **Drive ejected / normal boot:** dark.
 
 Global LED current is set to max (`0xFF`) for full brightness. The state hook is in
-`boards.c` (`led_state` arms the breathe, `led_tick` animates it — patch 0002) plus
+`boards.c` (`led_state` arms the breathe and `led_tick` animates it, patch 0002) plus
 the write-path call in `ghostfat.c` (patch 0001); the drawing primitives
 (`board_rgb_dfu_glyph`, `board_rgb_dfu_tick`, `board_rgb_progress`) live in
 `bootloader/apex_pro_mini_wl/pinconfig.c`. A single-writer lock guards the shared

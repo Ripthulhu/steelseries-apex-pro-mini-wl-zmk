@@ -25,7 +25,7 @@ license supplied with the Nordic MBR image and the S140 7.2.0 license shipped
 with the bootloader source.
 
 `apex-zmk-g4b/src/link_g4b.c` includes the Nordic USB errata helper sequence
-adapted from Zephyr's `nrf_usbd_common.c`. That portion is copyright Nordic
+adapted from Nordic's `nrf_usbd_common.c` (as vendored in the Zephyr tree). That portion is copyright Nordic
 Semiconductor ASA and licensed under Apache-2.0; the rest of that file is MIT.
 
 The current checkout and release downloads do not contain SteelSeries firmware,

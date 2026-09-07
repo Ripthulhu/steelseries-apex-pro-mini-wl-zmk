@@ -51,6 +51,24 @@ copied over the running bootloader until every UF2 block has arrived and its
 board and layout data have been checked. The release build also refuses to
 ship an application that reaches into this staging space.
 
+## Wireless update
+
+You can also update the keyboard application over the air, through the
+receiver's authenticated shell link, without opening `APEXBOOT`. The keyboard
+stays unplugged and paired in 2.4 GHz mode while the new image transfers over
+the radio. This path updates the application only. A bootloader update or a
+recovery still needs USB or SWD.
+
+A wireless update shows the same red-to-green key-matrix progress bar as the
+USB/DFU path. The bar fills once while the image transfers over radio, then
+again while the bootloader copies it into internal flash, and the board turns
+green when each step finishes.
+
+Note that a wireless update needs an update-capable keyboard build and a
+one-time setup over USB first. See
+[Wireless keyboard updates](../update/README.md) for the full procedure and
+commands.
+
 ## Other ways to open update mode
 
 These are intended for development or recovery. Most users only need the key

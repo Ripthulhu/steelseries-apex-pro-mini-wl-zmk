@@ -88,7 +88,7 @@ so this project leaves the STM32 untouched.
 
 ## Debug headers
 
-### Nordic CN3 — use this header
+### Nordic CN3, use this header
 
 The Nordic header is a row of nine round pads under the space bar. Remove only
 the space-bar keycap to reach it; the keyboard case stays fully assembled.
@@ -114,7 +114,7 @@ VDD  SWDCLK  SWDIO  GND  RESET  UTX  URX  DTM  SWO
 Follow [INSTALL.md](INSTALL.md) for wiring. Normal SWD needs only `SWDCLK`,
 `SWDIO`, and `GND`.
 
-### STM32 five-pad header — do not use for installation
+### STM32 five-pad header, do not use for installation
 
 ```text
 VMCU  SWDIO  SWCLK  NRST  GND
@@ -135,7 +135,7 @@ is unrelated to Nordic installation or recovery.
 | TWI1/I²C | P0.16 SCL, P0.17 SDA | BQ25895 at `0x6A` | 400 kHz in stock firmware; current driver uses 100 kHz |
 | SAADC | P0.03 / AIN1 | Mode-switch divider | Approximately 0 V, 1.6 V, and 3.3 V for the three positions |
 | USB | D+ and D− through U10 | USB host | U10 must be enabled through P0.25 before enumeration |
-| Radio | Internal nRF52833 peripheral | Bluetooth or the custom 2.4 GHz receiver | Custom radio builds carry keyboard/media input; stock dongle compatibility isn't implemented |
+| Radio | Internal nRF52833 peripheral | Bluetooth or the custom 2.4 GHz receiver | One image carries both BLE and the custom 2.4 GHz receiver link (keyboard/media input). The mode switch picks which is active. It doesn't use the SteelSeries protocol |
 
 SPIM0 and the low-frequency crystal function share P0.00/P0.01. The board uses
 the nRF internal RC source for LFCLK so those pins remain available to the NOR.
@@ -199,11 +199,11 @@ The USB-C data pair passes through U10 before reaching the Nordic. U10 is a
 single data switch, not a mux: it has one control line, **P0.25**, and no select
 input. Driving P0.25 high connects the data pair to the Nordic; a correctly
 configured USB peripheral cannot enumerate while it is low. The switch gates
-data only — VBUS and charging are independent of P0.25, so the charger keeps
+data only. VBUS and charging are independent of P0.25, so the charger keeps
 running with the data path cut.
 
 Stock connects the path on every USB attach and cuts it in one case: when a
-transport is active and the output moves away from USB (the charge-only case —
+transport is active and the output moves away from USB (the charge-only case,
 cable in for power while the keyboard talks over Bluetooth or the dongle). The
 full register-level trace, the apply function, and the cut condition are in
 [reverse-engineering/USB_DATA_PATH.md](reverse-engineering/USB_DATA_PATH.md).
@@ -237,7 +237,7 @@ The stock and open Nordic layouts are different. Use the current
 - The exact U10 USB-switch part is not confirmed, though its control (P0.25) and
   the stock switching policy are fully traced (see
   [reverse-engineering/USB_DATA_PATH.md](reverse-engineering/USB_DATA_PATH.md)).
-- P0.08 (SPIM2 MISO) is routed to the RGB controller's SDO pad — confirmed on
+- P0.08 (SPIM2 MISO) is routed to the RGB controller's SDO pad, confirmed on
   hardware, so SPI register read-back and per-LED open/short detection work
   (see [reverse-engineering/RGB_CONTROLLER.md](reverse-engineering/RGB_CONTROLLER.md)).
 - P0.20 and some unpopulated or support-device functions remain inferred.

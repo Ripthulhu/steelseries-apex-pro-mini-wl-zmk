@@ -11,17 +11,17 @@ For the experiments behind these findings, see
 ## The STM32 scanner link
 
 The nRF talks to the STM32 over SPIM3 as master, at 4 Mbit/s, SPI mode 0, MSB
-first. There is no chip-select — `PSEL.CSN` is left disconnected. Instead the
+first. There is no chip-select, `PSEL.CSN` is left disconnected. Instead the
 STM32 gates each transfer with a ready line, and signals pending key data with a
 separate attention line.
 
 Two GPIO lines carry the handshake:
 
-- **P0.05 — transfer-ready** (input to the nRF, via GPIOTE, low→high). The nRF
+- **P0.05, transfer-ready** (input to the nRF, via GPIOTE, low to high). The nRF
   waits for this before each phase of a transfer. It's a level that holds high
   once the STM32 is up, and drops while the STM32 is busy, so the code checks
   the level first and falls back to the edge.
-- **P0.24 — attention** (input). High means the STM32 has a key event queued.
+- **P0.24, attention** (input). High means the STM32 has a key event queued.
   When it's high the nRF reads a key report; when it's low the nRF sends a
   periodic heartbeat instead. In stock it doubles as a `PORT`/`SENSE` wake
   source while the nRF sleeps.
@@ -43,9 +43,9 @@ The opcode is `tx[0]`. These are the ones seen in use:
 | `0x20` | Change or query the scanner state. |
 | `0x30`, `0x33` | Write 70-entry per-key actuation tables. |
 | `0x35` | Write per-key rapid-trigger sensitivity in tenths of a millimetre. |
-| `0x31`, `0x32`, `0x34`, `0x36`–`0x38`, `0x90`, `0xA4` | Other setup commands seen in the stock boot replay. Do not send `0x32`; it writes calibration to flash. |
+| `0x31`, `0x32`, `0x34`, `0x36`-`0x38`, `0x90`, `0xA4` | Other setup commands seen in the stock boot replay. Do not send `0x32`; it writes calibration to flash. |
 
-The STM32's own dispatch is `id = rx[0] & 0x3F`, `dir = rx[0] >> 7` — the top bit
+The STM32's own dispatch is `id = rx[0] & 0x3F`, `dir = rx[0] >> 7`. The top bit
 is a read/write direction and the low six bits select the handler. That's why
 searching the STM32 image for a literal `0xA2` compare finds nothing; the
 handler is reached through a table, not an immediate comparison.
@@ -59,9 +59,9 @@ This is why bringing up the scanner anywhere (the app at boot, and any would-be
 cold reader like the bootloader) requires replaying the sequence first.
 
 The firmware replays the exact stock configuration captured from stock firmware
-**3.24.1** — 59 frames of 64 bytes, frozen in `apex-zmk-g4b/apex_boot_prefix.h`
-(SHA-pinned; regenerate with `extract_boot_prefix.py --check` against the decoded
-SPIM3 trace). Each frame is sent byte-for-byte and its full 64-byte reply is
+**3.24.1**, 59 frames of 64 bytes, frozen in `apex-zmk-g4b/apex_boot_prefix.h`
+(SHA-pinned; verify with `extract_boot_prefix.py --check` against the decoded
+SPIM3 trace, regenerate with `--output`). Each frame is sent byte-for-byte and its full 64-byte reply is
 compared against the recorded `expect_rx`; **any mismatch aborts** the bring-up,
 so a clean run is proof the STM32 is in the expected state. Frames are paced at
 **8 ms** (`G4B_S2_FRAME_PACE_US`), matching stock, and gated on the READY line
@@ -71,27 +71,27 @@ The 59 frames are two near-identical programming passes bracketing the enable:
 
 | Frames | Opcode(s) | Role |
 |--------|-----------|------|
-| 1 | `0x90` | Version query → ASCII `3.24.1` (a fixed, verifiable anchor) |
+| 1 | `0x90` | Version query -> ASCII `3.24.1` (a fixed, verifiable anchor) |
 | 2 | `0xA4` | Init / config reset |
-| 3–8 | `0x30`,`0x33` ×3 pairs | Per-key actuation + secondary threshold tables |
+| 3-8 | `0x30`,`0x33` ×3 pairs | Per-key actuation + secondary threshold tables |
 | 9 | `0x34` | Table boundary / commit marker |
-| 10–12 | `0x35` ×3 | Per-key rapid-trigger sensitivity (chunked over the 70 keys) |
-| 13–24 | `0x36` ×12 | Nine-byte logical neighbour records, six keys per frame. Readers near `0x08007CF4` and `0x08007B40` update key-state links. A held-G test changed other Hall samples by at most four counts. See [the scanner investigation](reverse-engineering/SCANNER.md#the-neighbour-table-isnt-magnetic-compensation). |
-| 25–28 | `0x37` ×4 | Per-key **signed actuation trim** + enable bit (`37 <count> [idx, val, flag]…`). The `val` byte is stored at `SB+0x491+key` and the enable bit in the `SB+0x488` bitmap; at scan time (`~0x08007984`) it is read `sxtb` (signed) and, if the key's enable bit is set, **added as an offset into the actuation travel calc** (`0x0800d3e0` table). Stock ships a uniform `0x14` (+20) with every key enabled — a fine per-key offset on top of the global `0x30`/`0x33` threshold. |
+| 10-12 | `0x35` ×3 | Per-key rapid-trigger sensitivity (chunked over the 70 keys) |
+| 13-24 | `0x36` ×12 | Nine-byte logical neighbour records, six keys per frame. Readers near `0x08007CF4` and `0x08007B40` update key-state links. A held-G test changed other Hall samples by at most four counts. See [the scanner investigation](reverse-engineering/SCANNER.md#the-neighbour-table-isnt-magnetic-compensation). |
+| 25-28 | `0x37` ×4 | Per-key **signed actuation trim** + enable bit (`37 <count> [idx, val, flag]…`). The `val` byte is stored at `SB+0x491+key` and the enable bit in the `SB+0x488` bitmap; at scan time (`~0x08007984`) it is read `sxtb` (signed) and, if the key's enable bit is set, **added as an offset into the actuation travel calc** (`0x0800d3e0` table). Stock ships a uniform `0x14` (+20) with the `flag` byte `0x00` on every key, a fine per-key offset on top of the global `0x30`/`0x33` threshold. |
 | 29 | `0x38 f4 01` | Configuration scalar = `0x01F4` (500); not a demonstrated 500 Hz scan rate |
-| 30 | `0x20 01 01` | Scanner state/enable → replies `20 00` |
-| 31–57 | (repeat 3–29) | Second pass; the `0x30`/`0x33` frames carry a `0x20` marker in byte 3 |
-| 58 | `0x20 01 01` | Enable again → now replies `20 02 02` — the state has advanced to configured |
+| 30 | `0x20 01 01` | Scanner state/enable -> replies `20 00` |
+| 31-57 | (repeat 3-29) | Second pass; the `0x30`/`0x33` frames carry a `0x20` marker in byte 3 |
+| 58 | `0x20 01 01` | Enable again -> now replies `20 02 02`, the state has advanced to configured |
 | 59 | `0xA1` | First key poll (empty when no keys are held) |
 
 The single `0x20` state byte moving from `00` (frame 30) to `02 02` (frame 58) is
 the observable proof the second pass took: the scanner is only "armed" after both
-passes complete. The replay is **not** purely verbatim — `s2_apply_actuation` and
+passes complete. The replay is **not** purely verbatim, `s2_apply_actuation` and
 `s2_apply_rapid_trigger` patch the live user thresholds into the `0x30`/`0x33`
 (and `0x35`) frames before each is sent, so the board boots with the configured
 actuation/rapid-trigger points rather than the stock capture's defaults, while
-every other byte still has to echo exactly. **Never** let `0x32` into this stream
-— it commits calibration to the STM32's flash (see below).
+every other byte still has to echo exactly. **Never** let `0x32` into this stream,
+because it commits calibration to the STM32's flash (see below).
 
 `apex-zmk-g4b/build_scanner_config.py` reconstructs the 59 captured transmit
 frames from parameters and retained records: actuation `{press,release}`
@@ -108,17 +108,17 @@ magnetic coupling.
 
 ### The key report (`0xA1`)
 
-There is no opcode echo — the reply starts straight into the payload. The
+There is no opcode echo, the reply starts straight into the payload. The
 response is a **9-byte key bitmap** in `rx[0..8]`, followed by a status byte
 in `rx[9]`, and a second bitmap in `rx[10..18]`. Each bit is one physical key
 position; the firmware maps those
 positions to a 5×14 ZMK matrix through the `apex_scan_to_matrix` table in
 `apex-zmk-g4b/src/kscan_g4b.c`. A few positions are unused, and the bottom row
-isn't in scan order — that mapping was recovered empirically from captures.
+isn't in scan order. That mapping was recovered empirically from captures.
 
 The interpretation is confirmed against real presses: bit 65 is Fn, bit 17 is E,
 bit 16 is W, and holding Fn+E produced exactly `bits [17, 65]`. The stock
-firmware additionally parses a second bitmap at `rx[10..18]`; this ingest uses the
+firmware also parses a second bitmap at `rx[10..18]`. This ingest uses the
 first.
 
 The status byte (`rx[9]`) matches the matrix-wide travel scalar returned in
@@ -130,7 +130,7 @@ or count of queued events.
 ### Stock polling
 
 The stock poll task (`0x256C8`) reads `0xA1` only while attention is high,
-exactly once per scheduler tick — roughly a millisecond — and then re-arms
+exactly once per scheduler tick (roughly a millisecond), and then re-arms
 itself. There is no drain loop: a backlog clears across ticks because attention
 stays high until the queue empties. Captures show one `0xA1` frame for each press
 or release.
@@ -214,7 +214,7 @@ and above 0xD3 (3.8 mm, full travel). Some landmarks:
 | 16 | 1.0 mm |
 | 29 | 1.5 mm |
 | 46 | 2.0 mm |
-| 50 | 2.1 mm — stock's press point |
+| 50 | 2.1 mm, stock's press point |
 | 70 | 2.5 mm |
 | 110 | 3.0 mm |
 
@@ -230,11 +230,11 @@ table puts the deeper value there. Reversed behavior would indicate that this
 assignment needs to be revisited.
 
 If a key's calibration is missing or fails its CRC, the scanner falls back to
-the default pair `{928, 3136}`, which puts actuation at a raw level of 1361 —
+the default pair `{928, 3136}`, which puts actuation at a raw level of 1361,
 and any key whose resting level happens to sit above that then reads pressed
 forever, because the fallback's auto-ranging only ever lowers `LO`.
 
-### `0x32` writes flash — do not send it
+### `0x32` writes flash, do not send it
 
 The recalibration path is `0x31 01` to wipe and enter learn mode, a full press
 of every key, `0x31 00` to leave, then `0x32` to persist. **`0x32` reaches
@@ -278,15 +278,15 @@ The controller sits on SPIM2 with chip-select bit-banged on P0.11. Every write
 is chip-select low, then `{command, register, data…}`, then chip-select high:
 
 ```
-command 0x50 → PWM page       (198 brightness registers, addressed 1..198)
-command 0x51 → scaling page   (198 current-scale registers, 1..198)
-command 0x52 → function page  (configuration registers, addressed literally)
+command 0x50 -> PWM page       (198 brightness registers, addressed 1..198)
+command 0x51 -> scaling page   (198 current-scale registers, 1..198)
+command 0x52 -> function page  (configuration registers, addressed literally)
 ```
 
 On the PWM and scaling pages the register byte is 1-based; on the function page
 it's the literal register number. The controller auto-increments its register
-pointer within a page, so a whole page goes out as a single framed transfer —
-`{0x50, 0x01, <198 bytes>}` for a full frame — rather than 66 per-LED writes.
+pointer within a page, so a whole page goes out as a single framed transfer
+(`{0x50, 0x01, <198 bytes>}` for a full frame) rather than 66 per-LED writes.
 
 Bring-up, taken from the stock init:
 
@@ -319,10 +319,10 @@ The keyboard exposes SteelSeries' HID update interface on two USB IDs:
 An image is `0x4B000` bytes, based at internal flash `0x1C000`, and it carries
 its own CRC-32 such that the whole image CRCs to the residue `0x2144DF1C`. The
 stock-protocol flasher ([`installer/flash_stock.py`](../installer/flash_stock.py))
-sends it in `0x32`-byte HID feature reports to file 11 on filesystem 3. Those
-bytes are staged unchanged in the external SPI flash from `0x014000`; each
-write is CRC-checked. On reset, the factory loader validates that staged image
-and applies it to the internal application slot at `0x1C000`–`0x67000`.
+sends it in HID output reports to file 11 on filesystem 3, each report carrying a
+`0x32`-byte (50-byte) image chunk. Those bytes are staged unchanged in the
+external SPI flash from `0x014000`; each write is CRC-checked. On reset, the factory loader validates that staged image
+and applies it to the internal application slot at `0x1C000`-`0x67000`.
 
 The generic `02 00 10` feature report did not establish recovery entry on the
 stock keyboard. GG's device definitions instead describe file updates against

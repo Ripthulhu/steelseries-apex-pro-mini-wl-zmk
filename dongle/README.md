@@ -6,10 +6,10 @@ Wireless. It receives keyboard and media reports from ZMK over an encrypted
 It does not use the SteelSeries protocol or pair through GG.
 
 The release keyboard image carries this 2.4 GHz link alongside BLE, so a normal
-release keyboard pairs with the receiver directly — the mode is chosen by the
-hardware switch. The receiver also relays wireless keyboard updates from
-`tools/dongle.py`. Both devices still need matching radio builds; use the
-keyboard and receiver from the same release or CI run.
+release keyboard pairs with the receiver directly. The hardware switch chooses
+the mode. The receiver also relays wireless keyboard updates from
+`tools/dongle.py`. Both devices still need matching radio-protocol versions, so
+use the keyboard and receiver from the same release or CI run.
 
 ## Analog controller
 
@@ -42,8 +42,8 @@ Ready-to-flash files are available under **Build keyboard and receiver** in
 Choose a successful run and download both `apex-dongle` and
 `apex-keyboard-radio` from that same run. GitHub requires a login for these
 development downloads. Tagged releases publish the receiver installer
-(`apex-dongle.zip`) next to the keyboard; the release keyboard is the matching
-2.4 GHz build.
+(`apex-dongle.zip`) next to the keyboard. The release keyboard already carries
+the 2.4 GHz link.
 
 ## Build both applications
 
@@ -76,7 +76,7 @@ to the separately downloaded, hash-checked stock image.
 Keyboard (one command):
 
 ```sh
-python apex-zmk-g4b/build_g4b.py --stage 3 --usb-studio --kscan-ingest --persistent --plain-image --wireless-idle --ab-rollback --shell --extra-conf apex-zmk-g4b/g4b_shell_release.conf --extra-conf apex-zmk-g4b/g4b_radio_input.conf --work-root ../work
+python apex-zmk-g4b/build_g4b.py --stage 3 --usb-studio --kscan-ingest --persistent --plain-image --wireless-idle --ab-rollback --shell --extra-conf apex-zmk-g4b/g4b_shell_release.conf --extra-conf apex-zmk-g4b/g4b_radio_input.conf --extra-conf apex-zmk-g4b/g4b_radio_update.conf --extra-conf apex-zmk-g4b/g4b_release_size.conf --work-root ../work
 ```
 
 Its update file is
@@ -226,8 +226,8 @@ input is queued. USB completions are reported in the next solicited reply;
 unsolicited completion replies are not used. See the [protocol notes](../radio/README.md)
 for the delivery format and timing counters.
 
-Recent sustained tests delivered 889–954 reports per second through radio and
-997–999 through USB alone. All 9,000 reports in the latest radio batch completed.
+Recent sustained tests delivered 889-954 reports per second through radio and
+997-999 through USB alone. All 9,000 reports in the latest radio batch completed.
 These are throughput tests, not measurements from physical keypress to application.
 
 On battery, dongle mode now shares the keyboard's Bluetooth idle policy: scanner

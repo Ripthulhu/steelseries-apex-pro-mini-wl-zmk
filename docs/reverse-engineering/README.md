@@ -116,13 +116,14 @@ image back into internal flash before running it.
 Removing the old SoftDevice reservation moved the ZMK application from the
 early `0x27000` layout to `0x1000`. Zephyr supplies the Bluetooth controller, so
 keeping that reservation was wasting both flash and RAM. The
-[flash map](../FLASH_MEMORY_MAP.md) is the current layout. The proposed second
-full-size wireless-update image isn't installed yet.
+[flash map](../FLASH_MEMORY_MAP.md) is the current layout, and it includes the
+second full-size A/B image. Wireless changed-image updates work now and were
+validated on hardware, with a wired recovery path kept as a fallback.
 
 There are separate power problems to solve. The scanner can run less often,
 the Nordic can sleep between events, and the RGB rails can be shut off entirely.
 Turning PWM values to zero doesn't do all three. The idle policy now also
-applies to the custom radio builds. A shorter deep-sleep test confirmed wake by
+applies to the wireless firmware (BLE and 2.4 GHz). A shorter deep-sleep test confirmed wake by
 a held key and by moving the mode switch. That checks wake behaviour, not battery
 life or current consumption.
 

@@ -5,7 +5,10 @@ to edit anything to install it.
 
 ZMK and Zephyr use Kconfig files: one `CONFIG_NAME=value` setting per line.
 The main release settings are in [`g4b_usb.conf`](../apex-zmk-g4b/g4b_usb.conf).
-Scanner idle timing is kept in
+The release layers the shell, radio-input, wireless-update, and release-size
+fragments (`g4b_shell.conf` plus `g4b_shell_release.conf`, `g4b_radio_input.conf`,
+`g4b_radio_update.conf`, `g4b_release_size.conf`) on top of that base. Scanner
+idle timing is kept in
 [`g4b_wireless_idle.conf`](../apex-zmk-g4b/g4b_wireless_idle.conf), and
 [`g4b_ab_v2.conf`](../apex-zmk-g4b/g4b_ab_v2.conf) enables recovery for every
 release build.
@@ -45,7 +48,7 @@ enables and checks A/B recovery. The finished bundle includes
 | `CONFIG_ZMK_BATTERY_REPORT_INTERVAL` | `60` | Seconds between battery updates |
 | `CONFIG_APEX_G4B_CHARGE_STOP_PCT` | `80` | Stop-charging threshold |
 | `CONFIG_APEX_G4B_CHARGE_RESUME_PCT` | `72` | Resume-charging threshold |
-| `CONFIG_APEX_G4B_GAMEPAD` | `y` | W/A/S/D analog gamepad over USB, or through the dongle in radio builds |
+| `CONFIG_APEX_G4B_GAMEPAD` | `y` | W/A/S/D analog gamepad over USB, or through the dongle when the switch selects 2.4 GHz |
 
 The scanner period is stored in one byte, so 255 ms is its limit. These slower
 periods apply only on battery in Bluetooth mode. USB keeps the scanner at full
@@ -53,11 +56,14 @@ speed, and a key immediately returns it to full speed.
 
 ## Release logging
 
-Release firmware compiles Zephyr logging out with `CONFIG_LOG=n`. The shell,
-boot banner, `printk`, diagnostic USB/UART output, and standalone
-capture tests are also off. This avoids serial traffic, extra startup work, and
-needless wakeups on battery. The release builder rejects local overrides that
-enable one of those test features.
+Release firmware ships the shell with `CONFIG_SHELL=y`: the interactive `apex`
+console, the SWD-replacement tools, and the Studio RPC. Logging is on too, but
+deferred (`CONFIG_LOG=y`, `CONFIG_LOG_MODE_DEFERRED=y`, `CONFIG_PRINTK=y`) so the
+formatting cost stays off the scanner and radio timing path.
+`g4b_shell_release.conf` then drops the bench-only diagnostics that add runtime
+cost: live UART telemetry, the thread analyzer, and stack-fill instrumentation.
+The release builder rejects local overrides that enable board features outside
+the release set.
 
 `CONFIG_APEX_G4B_COREDUMP=y` is deliberately left on. It writes a small record
 to external flash only after a fatal fault, then resets so A/B recovery can do
@@ -65,17 +71,16 @@ its job. It does not stream logs or run in the background.
 
 ## Radio diagnostics
 
-The separate keyboard and receiver radio builds enable
-`CONFIG_APEX_RADIO_SHELL=y`. This allows `keyboard battery`, `keyboard radio`
-and other keyboard commands in the
-receiver's serial terminal to run a command on the keyboard. It requires the
-shell and radio-input support on both devices; it is not enabled in the normal
-keyboard release. See [the receiver guide](../dongle/README.md#keyboard-diagnostics-through-the-receiver).
+The release keyboard ships `CONFIG_APEX_RADIO_SHELL=y` (in
+[`g4b_radio_input.conf`](../apex-zmk-g4b/g4b_radio_input.conf)). From the
+receiver's serial terminal you can run `keyboard battery`, `keyboard radio` and
+other `keyboard` commands, which forward over the 2.4 GHz link and run on the
+keyboard. See [the receiver guide](../dongle/README.md#keyboard-diagnostics-through-the-receiver).
 
-On the keyboard this adds a shell thread and fixed-size transfer buffers,
-using about 5.8 KiB more RAM than the same radio build without it. The Bluetooth
-shell remains disabled. Set `CONFIG_APEX_RADIO_SHELL=n` in a local override on
-both devices to remove the remote shell without removing their USB consoles.
+On the keyboard this adds a shell thread and fixed-size transfer buffers, using
+about 5.8 KiB of RAM. The Bluetooth shell stays disabled. Set
+`CONFIG_APEX_RADIO_SHELL=n` in a local override on both devices to drop the
+remote shell without removing their USB consoles.
 
 ## USB data path
 
@@ -89,8 +94,8 @@ Bluetooth is the active output. The register-level trace of U10 is in
 
 The pin boots high and the gate only drops it on confirmed battery operation, so
 it never gates the first enumeration or DFU recovery. Turning it off holds P0.25
-high at all times — the prior behavior, and harmless, it just leaves the data
-switch powered on battery where there is no host to reach.
+high at all times. That's the prior behaviour and it's harmless. It just leaves
+the data switch powered on battery where there is no host to reach.
 
 This is the safe half of the stock policy. Stock also cuts the data path in
 charge-only mode (a cable in for power while the output is Bluetooth or the
@@ -141,8 +146,10 @@ Do not override the following in a normal local build:
   flash, and charger drivers own their peripherals directly.
 - `CONFIG_ARM_MPU`, `CONFIG_HW_STACK_PROTECTION`, `CONFIG_SRAM_SIZE`, or the
   application partition. They are tied to the board's custom memory layout.
-- `CONFIG_APEX_G4B_DONGLE_RADIO`. This releases the Bluetooth controller for
-  radio development; it does not enable a working dongle connection.
+- `CONFIG_APEX_G4B_DONGLE_RADIO`. It's on in the release as part of the radio
+  stack (with `CONFIG_APEX_G4B_RADIO_INPUT` and `CONFIG_APEX_G4B_RADIO_PAIRING`);
+  the hardware switch selects BLE or 2.4 GHz. Turning it off breaks the 2.4 GHz
+  link.
 
 If Kconfig warns that a value was ignored, do not force it elsewhere. Some
 symbols are selected by another feature or calculated by Zephyr. Change the

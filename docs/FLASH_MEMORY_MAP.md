@@ -62,5 +62,7 @@ Before preparation, the LittleFS reservation extends to `0x80000` and
 `0x82000..0x8B000` is unassigned. Preparation refuses to reclaim a filesystem
 with unrecognized contents. The settings and fallback addresses are unchanged.
 
-The release verifier checks the internal partition, external A/B slot, linker
-symbols, and bootloader constants together.
+The release build runs several verifiers. `verify_release_config` checks the
+Kconfig, `verify_final_uf2.py` checks the packaged UF2 image,
+`verify_bootloader_update.py` checks the bootloader update against the
+application, and `verify_release.py` checks the sources and pinned dependencies.

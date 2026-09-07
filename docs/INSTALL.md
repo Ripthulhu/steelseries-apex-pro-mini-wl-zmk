@@ -172,7 +172,7 @@ Wire the 40-pin Pi header as follows:
 |---|---:|---:|
 | `SWDIO` | GPIO8 | 24 |
 | `SWDCLK` | GPIO11 | 23 |
-| `GND` | — | 25 |
+| `GND` | n/a | 25 |
 | `RESET`, only for the manual recovery pulse | GPIO24 | 18 |
 
 Keep the wires short. Copy the release folder to the Pi; it already contains
@@ -321,6 +321,12 @@ open. Follow [Make a backup before a larger repair](SWD_RECOVERY.md#make-a-backu
 Do not repeat the wired installation. Hold `Fn` + `Right Ctrl` + `Esc`, wait for
 `APEXBOOT`, and copy the new `apex-zmk.uf2` to it. See
 [Updating and recovery](FLASHING.md) if the drive does not appear.
+
+You can also push a changed image over the air instead of using the `APEXBOOT`
+drive. The key-matrix fills red to green while the image transfers over radio,
+then fills red to green again while the bootloader copies it to internal flash,
+the same progress bar the USB route shows. See
+[Updating and recovery](FLASHING.md) for the wireless steps.
 
 For repair procedures after the first installation, see
 [SWD_RECOVERY.md](SWD_RECOVERY.md).

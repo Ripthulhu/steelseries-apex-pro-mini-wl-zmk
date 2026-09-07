@@ -17,7 +17,7 @@ for other STM32 families:
 | [`picobit`](https://github.com/SteelSeries/picobit) | Scheme VM with STM32F100 and F4 ports | Generic examples only |
 
 Their public branches and tags contain no nRF52833 board support, Nordic
-SoftDevice source, STM32G070 code, product DFU implementation, or keyboard
+SoftDevice source, STM32G0 code, product DFU implementation, or keyboard
 firmware.
 
 ## GameSense

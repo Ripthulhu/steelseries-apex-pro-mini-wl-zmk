@@ -1,4 +1,4 @@
-# USB installer for stock first-generation keyboards — untested
+# USB installer for stock first-generation keyboards (untested)
 
 This targets the first-generation Apex Pro Mini Wireless and installs the
 Adafruit-based `APEXBOOT` bootloader through the stock SteelSeries USB update
@@ -45,14 +45,14 @@ new bootloader then stays in `APEXBOOT`, ready for the regular application UF2.
 | `0x6E000..0x78000` | New UF2 bootloader destination |
 
 The MBR copy moves only the contiguous loader payload. On its first start, the
-new loader erases the factory settings record at `0x6C000`. It repeats that erase
+new loader erases its own settings page at `0x6C000`. It repeats that erase
 while S113 remains and stays in update mode until the first complete UF2 has
 replaced S113 and passed application validation.
 
 The final firmware remains linked at `0x1000`. In this compatibility layout its
 maximum accepted image is `0x66000` bytes (408 KiB), ending at `0x67000`. The
-current release is below this limit, stores settings in external NOR, and
-retains A/B rollback with the same 408 KiB ceiling.
+current release stays below this limit and stores settings in external NOR.
+A/B rollback lives in the 452 KiB external slot.
 
 ## Checks before writing
 
@@ -143,7 +143,8 @@ Testing requires an untouched keyboard with its protected factory loader still
 present. Connect SWD and confirm the Nordic CTRL-AP responds, but do not unlock
 it: unlocking performs a mass erase, and protected flash cannot be backed up.
 Then send the migration through both stock USB IDs, install the first UF2 from
-`APEXBOOT`, and verify USB, Bluetooth, scanner wake, and saved settings. For the
+`APEXBOOT`, and verify USB, Bluetooth, the 2.4 GHz receiver link, scanner wake,
+and saved settings. For the
 interruption tests, briefly short CN3 `RESET` to `GND` once during the MBR copy
 and once during the first UF2 write, then confirm that `APEXBOOT` returns. If the
 USB migration fails, use SWD to erase the Nordic and install the open firmware.

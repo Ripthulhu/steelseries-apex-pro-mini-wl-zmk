@@ -2,7 +2,7 @@
 
 The per-key RGB is an **IS31FL3743B** constant-current matrix driver: 18 current
 sinks × 11 switch lines, addressing 66 RGB positions on a 61-key board. It hangs off **SPIM2** and
-is written as a direct-register device — the open firmware does not use a Zephyr
+is written as a direct-register device. The open firmware does not use a Zephyr
 `led_strip` driver for it.
 
 ## Bus and pins
@@ -11,7 +11,7 @@ is written as a direct-register device — the open firmware does not use a Zeph
 |---|---|---|
 | SCK | P1.09 | SPIM2 clock, 4 Mbit/s |
 | MOSI (SDI) | P1.08 | data to the controller |
-| MISO (SDO) | P0.08 | the Nordic's SPIM2 MISO line — see *Read-back* below |
+| MISO (SDO) | P0.08 | the Nordic's SPIM2 MISO line, see *Read-back* below |
 | CS | P0.11 | Driven by software rather than the Nordic SPIM CSN output |
 | Driver rail | P0.19 | raised last, lowered first |
 | Array rail | P0.23 | raised first, lowered last |
@@ -47,10 +47,10 @@ Three helpers in the stock image program the function page at bring-up:
 
 The open firmware mirrors this bring-up in `rgb_g4b.c`.
 
-## SPI read-back and open/short detection — confirmed working
+## SPI read-back and open/short detection, confirmed working
 
 The IS31FL3743B supports SPI register reads, and **P0.08 is physically routed to
-the controller's SDO pad on this board** — confirmed on hardware. A read command
+the controller's SDO pad on this board**, confirmed on hardware. A read command
 is the write command with D7 set: `0xD0` (PWM page), `0xD1` (scaling), `0xD2`
 (function page). The transaction is `{read-cmd, start-register}` followed by
 clocked dummy bytes; the controller drives its data on SDO from the third byte
@@ -68,7 +68,7 @@ connects P0.08, proves the link, and reads the detection registers.
 | `0x00` | Configuration | R/W | `[D7:D4 SWS][D3=1][D2:D1 OSDE][D0 SSD]`; run value `0x09` |
 | `0x01` | Global Current | R/W | master current |
 | `0x02` | Pull select | R/W | de-ghost; `0x33` |
-| `0x03`–`0x23` | Open/Short result | R | 33 registers, 6 valid bits each (`D5:D0`) |
+| `0x03`-`0x23` | Open/Short result | R | 33 registers, 6 valid bits each (`D5:D0`) |
 | `0x24` | Temperature status | R | `TS` roll-off point + `TROF` current cut |
 | `0x25` | Spread spectrum | R/W | |
 | `0x2F` | Reset | W | |
@@ -77,19 +77,19 @@ connects P0.08, proves the link, and reads the detection registers.
 
 1. Connect P0.08 as a pulled-down input, `PSEL.MISO = 8`.
 2. Prove the link: write a sentinel (`0x5A`) to Global Current and read it back.
-   Needed because a healthy board's open registers read all-zero — the same as a
-   floating-low MISO — so only a sentinel distinguishes wired from unrouted.
+   Needed because a healthy board's open registers read all-zero (the same as a
+   floating-low MISO), so only a sentinel distinguishes wired from unrouted.
 3. Light every channel (PWM page `0xFF`; off dots are not scanned), set
    `GCC = 0x0F`, `pull = 0x00` (datasheet detect case 1).
-4. Trigger open: Config OSDE `00 → 01` (`0x09` then `0x0B`), wait ≥ 2 scan
-   cycles, read `0x03`–`0x23`. Repeat for short with OSDE `10` (`0x0D`).
+4. Trigger open: Config OSDE `00 -> 01` (`0x09` then `0x0B`), wait ≥ 2 scan
+   cycles, read `0x03`-`0x23`. Repeat for short with OSDE `10` (`0x0D`).
 5. Restore the controller (`g4b_rgb_bringup`) and repaint the frame.
 
 ### Result mapping
 
 Each of the 33 result registers holds 6 bits (`D5:D0`) for a group of CS lines;
-three registers cover one SW line (CS1–6, CS7–12, CS13–18), 11 SW lines = 33
-registers = 198 channels. A set bit is a fault. Channel → coordinate:
+three registers cover one SW line (CS1-6, CS7-12, CS13-18), 11 SW lines = 33
+registers = 198 channels. A set bit is a fault. Channel -> coordinate:
 
 ```
 SW = reg_index / 3 + 1        CS = (reg_index % 3) * 6 + bit + 1
@@ -102,10 +102,10 @@ Each LED occupies three consecutive CS lines within one SW, stored **B, G, R**.
 This board reads back cleanly. Its open scan reports **17 open channels, 0
 shorts**, all accounted for:
 
-- **Five full triplets** (all of B/G/R open) — SW2/CS10-12, SW3/CS16-18,
-  SW5/CS13-15, SW6/CS13-15, SW9/CS16-18 — are the five LED slots the driver
+- **Five full triplets** (all of B/G/R open at SW2/CS10-12, SW3/CS16-18,
+  SW5/CS13-15, SW6/CS13-15, SW9/CS16-18) are the five LED slots the driver
   addresses (66) beyond the keys this board has (61): unpopulated positions.
-- **One double-open** — SW3/CS1 (B) and SW3/CS2 (G) open, CS3 (R) intact — is a
+- **One double-open**, SW3/CS1 (B) and SW3/CS2 (G) open, CS3 (R) intact, is a
   physically faulty LED that lights red only. It is chain LED 12, which
   `g4b_led_hid` maps to HID `0x1F`: the number-row **"2"** key.
 

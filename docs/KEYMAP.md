@@ -16,7 +16,7 @@ normally sits is a second Fn key; this firmware does not assign Caps Lock.
   [analog gamepad](FEATURES.md#analog-gamepad); `Fn`+`Right Ctrl`+`S`
   toggles Studio over USB. The two share one USB endpoint, so enabling either
   drops the other; Studio over Bluetooth is always available.
-- `Fn`+`F`…`K` select Bluetooth profiles 0–4, `Fn`+`\` clears the current one.
+- `Fn`+`F`…`K` select Bluetooth profiles 0-4, `Fn`+`\` clears the current one.
 - The bottom row (`Fn`+`B`/`N`/`M`/`,`/`.`/`/`) is media transport.
 - To open the `APEXBOOT` update drive, hold Fn and press Esc and Right Ctrl
   together.
@@ -30,7 +30,7 @@ While Fn is held the array stops showing the current effect and becomes a
 legend, so the Fn functions and their state are readable at a glance. Releasing
 Fn repaints the effect immediately.
 
-### Mode toggles — green on, red off
+### Mode toggles: green on, red off
 
 Four keys are on/off modes. Held under Fn they show **green when on** and **red
 when off**; toggling one also flashes it **green twice** when it turns on or
@@ -43,11 +43,11 @@ when off**; toggling one also flashes it **green twice** when it turns on or
 | `T` | Rapid trigger |
 | `E` | Lighting on/off |
 
-### Battery gauge — number row
+### Battery gauge: number row
 
 The number row `1` … `=` is a 12-segment battery gauge. The **number of lit
 keys is the charge level** (each key ≈ 8%), and the colour is the health:
-**green above 40%, amber 15–40%, red below 15%**. The reading is the reported
+**green above 40%, amber 16-40%, red at 15% and below**. The reading is the reported
 state of charge, refreshed about once a minute.
 
 ### Category colours

@@ -149,7 +149,7 @@ in these builds.
 both devices. The current map is 2406, 2426, 2450 and 2474 MHz. Both input test
 configurations enable it; fixed-channel builds cannot communicate with them.
 
-A map contains 4–16 frequency offsets above 2400 MHz, in ascending order,
+A map contains 4-16 frequency offsets above 2400 MHz, in ascending order,
 at least 2 MHz apart. Offsets must be between 2 and 80. Each 20 ms slot selects
 a channel from that map. The session ID chooses a starting offset and a stride
 that visits every channel before repeating. This order is not a security
@@ -204,11 +204,11 @@ TIMER2 compare 0 wakes the radio thread for the earliest retry, input-window
 opening, clock-window opening or hop boundary. The interrupt only wakes the
 thread, so packet processing and thread scheduling can still delay a switch.
 `HOP_TIMER` counts timer interrupts and deadlines missed while arming the timer.
-The count now includes retry/window deadlines, not just channel changes. Receiver
+The count now includes retry/window deadlines as well as channel changes. Receiver
 idle waits can exceed 10 ms, so `loops_over_10ms` alone no longer indicates a stall.
 Missed deadlines wake the thread immediately instead of waiting for timer wrap.
 Clock transmissions may start between 3 and 13 ms into a slot. Once startup
-finishes, ordinary input and keepalives use 0.75–18.5 ms instead: these packets
+finishes, ordinary input and keepalives use 0.75-18.5 ms instead: these packets
 do not need the clock packet's scheduled lead. Replies may start until 19.5 ms,
 so the receiver can acknowledge input accepted near the input cutoff.
 The 0.75 ms opening guard and 1.5 ms closing guard leave a 2.25 ms gap across
@@ -279,14 +279,14 @@ failure. Rejected traffic can include packets from the session being replaced.
 ## Tests
 
 The 7 September transaction builds delivered 6000 empty keyboard reports in six
-1000-report runs at 631–643 reports/s. Each receiver USB completion was counted.
+1000-report runs at 631-643 reports/s. Each receiver USB completion was counted.
 There were no new link timeouts within a run, TX wait timeouts or USB errors.
 A deliberate receiver session reset and 500 ms USB hold between batches recovered.
 That reset causes an expected peer timeout; it does not test a continuously full
 receiver FIFO. Queue saturation, lost replies and ordered delivery are also
 covered by host tests. These rates are throughput, not a 1 ms latency claim.
 
-The earlier one-ahead input build measured 363–405 reports/s. The figures below
+The earlier one-ahead input build measured 363-405 reports/s. The figures below
 record earlier implementation stages and should not be read as current rates.
 
 ### Delivery throughput
@@ -298,16 +298,16 @@ has settled, run `apex radio_bench` in the keyboard shell.
 
 An optional argument changes the clock transmission lead for that run:
 `apex radio_bench 500` selects 500 us, also the transport's current default. Accepted
-values are 500–2000 us. The previous value is restored when the test ends,
+values are 500-2000 us. The previous value is restored when the test ends,
 including on failure. This changes neither the channel slot nor its guards.
 It lets us compare clock delays without flashing a build for each value.
 With no argument the benchmark retains its original 2000 us comparison setting.
 
-In earlier same-build tests, a 500 us lead delivered 247–299 reports/s across six
+In earlier same-build tests, a 500 us lead delivered 247-299 reports/s across six
 1000-report runs, without missed clock transmissions or new link timeouts.
-The 2000 us baseline delivered 180–250 reports/s in five completed runs.
+The 2000 us baseline delivered 180-250 reports/s in five completed runs.
 Another baseline run stopped after a link timeout. A 1000 us lead delivered
-202–273 reports/s in three runs. The shorter lead looks useful, but these
+202-273 reports/s in three runs. The shorter lead looks useful, but these
 tests did not establish long-run reliability. These results predate the current
 buffered delivery and timer-driven retries.
 
@@ -376,7 +376,7 @@ delivery and liveness ACK preparation at the send site, excluding any earlier
 prepared-ACK encryption. Clock and pairing packets are excluded.
 These measure elapsed time around the calls, including any preemption.
 
-A further three-run test with these counters delivered 189–212 reports/s.
+A further three-run test with these counters delivered 189-212 reports/s.
 Average `SEND_ACK` was 3.80 ms and `ACK_NEXT` was 1.14 ms. Input encoding
 averaged 159 us, keyboard data decoding 166 us, receiver data decoding 184 us
 and ACK encoding 167 us. USB completion averaged 536 us. All 3000 reports
@@ -393,8 +393,8 @@ overflow are not. Check the overflow and reset counters alongside it.
 `USB_COMPLETE` in `dongle hid_status` measures successful USB submissions in the
 current session generation, excluding release reports. Both timing summaries
 accumulate until reboot and print count, minimum, maximum and total microseconds.
-Their six non-cumulative buckets are <=1 ms, >1–2 ms, >2–5 ms, >5–10 ms,
->10–20 ms and >20 ms. Subtract counts, totals and buckets between snapshots to
+Their six non-cumulative buckets are <=1 ms, >1-2 ms, >2-5 ms, >5-10 ms,
+>10-20 ms and >20 ms. Subtract counts, totals and buckets between snapshots to
 compare a test interval; minimum and maximum remain lifetime values. Counts
 freeze at UINT32_MAX rather than wrap. These counters contain no key values
 and do not measure physical-key-to-application latency or prove 1 kHz cadence.

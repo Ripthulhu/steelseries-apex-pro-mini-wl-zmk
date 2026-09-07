@@ -20,6 +20,9 @@ Download the ready-to-flash files from the
 - `apex-pro-mini-wl-ab.zip` contains the project files used for a first
   installation or repair: firmware, bootloader, checksum checker, and programmer
   configurations.
+- `apex-dongle.zip` is the receiver installer bundle: the receiver firmware, its
+  bootloader, and the stock USB installer. It's built by
+  `python tools/build_release.py --dongle`.
 
 `RELEASE-SHA256SUMS.txt` contains the download hashes.
 
@@ -39,7 +42,7 @@ OpenOCD command runs on the computer connected to it.
 
 See [First installation](docs/INSTALL.md) for the pinout and OpenOCD commands.
 
-### USB installer — untested
+### USB installer (untested)
 
 There is also an [experimental USB installer](installer/README.md) that sends a
 migration image through the SteelSeries update protocol and replaces the stock
@@ -65,6 +68,11 @@ After the first installation, updates are simple:
 The keyboard installs the file and restarts itself. See
 [Updating and recovery](docs/FLASHING.md) for the less common alternatives.
 
+You can also update over the air through the receiver with
+`python tools/dongle.py update`, after a one-time wired setup. It shows the same
+red-to-green key-matrix progress bar as the USB path. See
+[wireless keyboard updates](update/README.md).
+
 ## What works
 
 - **USB and Bluetooth:** keyboard input, media controls, the Fn layer,
@@ -73,10 +81,13 @@ The keyboard installs the file and restarts itself. See
   USB.
 - **No battery required on USB:** this firmware boots and works with the battery
   physically disconnected. The stock firmware refuses to start in that state.
-- **2.4 GHz receiver:** not supported by release firmware. The
-  [development builds](dongle/README.md#keyboard-input-development) provide
-  keyboard and media input with custom firmware on both devices. They do not
-  use the SteelSeries protocol or pair through GG.
+- **2.4 GHz receiver:** the release image carries a custom 2.4 GHz link
+  alongside Bluetooth, so it pairs with the receiver directly for keyboard and
+  media input. The hardware switch picks Bluetooth or 2.4 GHz. It doesn't use the
+  SteelSeries protocol or pair through GG. The receiver installer ships as
+  `apex-dongle.zip`; see the [receiver firmware](dongle/README.md).
+- **Serial shell:** the release image includes the `apex` diagnostic shell over
+  USB, and the same commands run over the radio through the receiver.
 - **USB analog gamepad:** tested, but games may need their input mapping changed.
   Some games will not work well with it and may require a mod.
 
@@ -142,6 +153,9 @@ local builds.
 | [`apex-zmk-g4b/`](apex-zmk-g4b/) | Keyboard drivers and firmware configuration |
 | [`apex-zmk-slot/`](apex-zmk-slot/) | Board definition, key bindings, and key positions |
 | [`bootloader/`](bootloader/) | Code that provides the `APEXBOOT` update drive |
+| [`dongle/`](dongle/) | Receiver firmware and its installer |
+| [`radio/`](radio/) | Shared 2.4 GHz link code |
+| [`update/`](update/) | Shared wireless and USB update code |
 | [`installer/`](installer/) | Experimental USB installer; get SWD working before trying it |
 | [`hardware/`](hardware/) | Board photographs, measurements, and pinout notes |
 | [`tools/`](tools/) | Build checks and programmer configuration files |

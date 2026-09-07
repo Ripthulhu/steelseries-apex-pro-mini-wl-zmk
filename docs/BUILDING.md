@@ -28,7 +28,7 @@ python tools/setup_workspace.py
 ```
 
 This downloads the exact ZMK source, compiler, and supporting libraries used by
-the project. It also applies the two changes that ZMK needs for this keyboard.
+the project. It also applies the patches ZMK needs for this keyboard.
 The download is several gigabytes and may take a while. It is safe to run the
 command again if it was interrupted.
 
@@ -61,15 +61,18 @@ native system and a virtual machine or compatibility layer.
 python tools/build_release.py
 ```
 
+The default image carries BLE, the custom 2.4 GHz receiver link, wireless
+update, and the shell. The hardware switch picks BLE or 2.4 GHz.
+
 The default build includes automatic recovery. It builds the application and
 bootloader, checks their memory layout, and writes these release files:
 
-- `../work/release/apex-pro-mini-wl-ab.uf2` — ready for a normal update;
-- `../work/release/apex-pro-mini-wl-bootloader-update.uf2` — updates an
+- `../work/release/apex-pro-mini-wl-ab.uf2`, ready for a normal update;
+- `../work/release/apex-pro-mini-wl-bootloader-update.uf2`, updates an
   already-installed `APEXBOOT` bootloader;
-- `../work/release/apex-pro-mini-wl-ab.zip` — the complete first-install and
+- `../work/release/apex-pro-mini-wl-ab.zip`, the complete first-install and
   repair bundle; and
-- `../work/release/RELEASE-SHA256SUMS.txt` — hashes for the release downloads.
+- `../work/release/RELEASE-SHA256SUMS.txt`, hashes for the release downloads.
 
 The ZIP is also left unpacked at `../work/release/apex-pro-mini-wl-ab`.
 
@@ -106,6 +109,17 @@ The files have different jobs:
 - The `.cfg` files tell OpenOCD how to use each included programmer setup.
 
 See [First installation](INSTALL.md) before writing any of them to a keyboard.
+
+To also build the receiver dongle bundle, pass `--dongle`:
+
+```sh
+python tools/build_release.py --dongle
+```
+
+This builds `apex-dongle.zip` (the receiver firmware, its bootloader, and the
+stock USB installer) into the release directory alongside the keyboard files.
+It needs a full release build, so you can't combine it with the bootloader-only
+or application-only flags.
 
 ## Development builds
 

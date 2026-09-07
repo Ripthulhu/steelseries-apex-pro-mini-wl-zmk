@@ -24,23 +24,25 @@ The bootloader raises P0.25 to enable the U10 USB data path, then raises P0.23
 and P0.19 for the RGB matrix used as its status display. Without P0.25,
 `APEXBOOT` cannot enumerate.
 
-In DFU, the key matrix is green while idle and red while writing. The volume
-label is `APEXBOOT`, the USB ID is `1D50:616F`, and the application UF2 family
-is `0x621E937A`.
+In DFU, idle shows a breathing red field with the D, F, and U keys green. A red
+bar fills left to right while writing, and the whole matrix turns green on
+success. The volume label is `APEXBOOT`, the USB ID is `1D50:616F`, and the
+application UF2 family is `0x621E937A`.
 
 ## Local changes
 
-The patches make eight targeted changes:
+The patches make nine targeted changes:
 
 1. enforce the board-defined application floor for app-family UF2 writes;
 2. connect bootloader state to the board's RGB DFU indicator;
 3. use a caller-supplied Zephyr SDK toolchain path;
 4. mask interrupts immediately before jumping to the application;
 5. restore a validated A/B-v2 image after three unhealthy boots;
-6. provide an opt-in layout matching the factory MBR's fixed addresses; and
-7. use the locked source date for reproducible bootloader version metadata; and
+6. provide an opt-in layout matching the factory MBR's fixed addresses;
+7. use the locked source date for reproducible bootloader version metadata;
 8. add the reset cause, A/B state, and newest crash summary to `INFO_UF2.TXT`,
-   with the validated raw record available as `CRASH.BIN`.
+   with the validated raw record available as `CRASH.BIN`; and
+9. build in tinycrypt SHA-256 for external (wireless) application updates.
 
 The A/B restore accepts only descriptor version 2, app base `0x1000`, image-B
 offset `0x8B000`, and a length no larger than `0x71000`. It verifies the staged

@@ -3,9 +3,9 @@
 The keyboard firmware is a ZMK application for the nRF52833. It's split across two
 Zephyr modules:
 
-- **[`apex-zmk-slot/`](../apex-zmk-slot/)** — the **board definition**: devicetree,
+- **[`apex-zmk-slot/`](../apex-zmk-slot/)**, the **board definition**: devicetree,
   pinctrl recovered from the stock image, the keymap, and board Kconfig.
-- **[`apex-zmk-g4b/`](../apex-zmk-g4b/)** — the **application module**: the `src/`
+- **[`apex-zmk-g4b/`](../apex-zmk-g4b/)**, the **application module**: the `src/`
   drivers that make this specific hardware work, the config, the devicetree
   bindings, and build/verification tools that do not require `west`.
 
@@ -26,8 +26,9 @@ startup the firmware therefore holds both scanner enables low for 250 ms,
 powers it again, waits for READY, and replays the 59 setup frames. UF2 updates
 do not need a power cycle or a USB replug afterward.
 
-Release builds enable scanner ingestion and USB Studio. Numbered build profiles
-are retained only for individual hardware diagnostics.
+Release builds enable scanner ingestion, USB Studio, the shell, the custom
+2.4 GHz radio link, and wireless updates. Numbered build profiles are retained
+only for individual hardware diagnostics.
 
 ## Key scanning
 
@@ -37,7 +38,7 @@ bitmap handed to it by the link code and reports pressed/released positions to
 ZMK's keymap. The link code polls the STM32's attention line, reads the `0xA1`
 key report when it's high, and calls `apex_g4b_kscan_ingest_bitmap` with the
 result. From ZMK's point of view it's an ordinary kscan device feeding an
-ordinary keymap — the Fn layer, the RGB controls, all of it work normally.
+ordinary keymap. The Fn layer, the RGB controls, all of it work normally.
 
 The permanent scan loop deliberately mirrors what the stock poll task does: read
 `0xA1` when attention is high, ingest on any successful read, and deduplicate
@@ -47,8 +48,8 @@ The bitmap contains absolute key levels. Repeated reads are harmless, while
 waiting for two identical reports can lose a key event because attention drops
 after the first report is consumed.
 
-The scanner link protocol — opcodes, the key report, actuation, and the flash
-write to avoid — is documented in [PROTOCOL.md](PROTOCOL.md).
+The scanner link protocol (opcodes, the key report, actuation, and the flash
+write to avoid) is documented in [PROTOCOL.md](PROTOCOL.md).
 
 ### How the scanner link was verified
 
@@ -70,16 +71,17 @@ hardware tests then checked it in stages:
 `mode_g4b.c` reads the three-position slide switch on P0.03 (via the SAADC) and
 classifies it as Bluetooth, USB-only, or dongle:
 
-- **Bluetooth** — BLE advertises and can be selected, as stock.
-- **USB-only** — BLE is held down; USB is the only endpoint.
-- **Dongle** — reserved for the vendor 2.4 GHz receiver. The release does not
-  implement this transport, so this position behaves like USB-only: a cable
-  works, but the SteelSeries receiver does not.
+- **Bluetooth**: BLE advertises and can be selected, as stock.
+- **USB-only**: BLE is held down; USB is the only endpoint.
+- **Dongle**: the board's own custom 2.4 GHz receiver link, which ships in the
+  release image alongside BLE and carries keyboard and media input plus wireless
+  updates. It's a custom protocol, so it doesn't use the SteelSeries protocol
+  and doesn't pair through GG.
 
 The switch is a voltage on an ADC pin and is sampled before the transports start.
-Experimental dongle builds reset when crossing the dongle boundary so BLE and
-the ESB driver never own the radio at the same time. Release builds keep both
-dongle options disabled. Use [`APEXBOOT` or SWD](FLASHING.md) for recovery.
+The firmware reboots when crossing the dongle boundary so BLE and the 2.4 GHz
+driver never own the radio at the same time. Use [`APEXBOOT` or SWD](FLASHING.md)
+for recovery.
 
 ## Lighting
 
@@ -90,7 +92,7 @@ SPIM2 register writes, and `led_strip_g4b.c` implements Zephyr's `led_strip`
 
 That indirection is deliberate. Going through Zephyr's SPI/LED stack would pull in
 `CONFIG_SPI`, `CONFIG_PINCTRL`, and `CONFIG_GPIO`, all of which the verifier
-constrains — pinctrl reconfigures pins at boot, and this firmware keeps every pin
+constrains: pinctrl reconfigures pins at boot, and this firmware keeps every pin
 write in one auditable place (`pins_g4b.c`, the sole owner of GPIO register
 writes). `rgb_fx_g4b.c` is a higher-rate effect engine that runs alongside ZMK's
 underglow, and `rgb_map_g4b.c` holds the LED↔key mapping tables recovered from
@@ -106,12 +108,18 @@ in this tree. The implementation detail and complete entry-method table are in
 [Flash layout](FLASH_MEMORY_MAP.md), and the normal user procedure is in
 [Updating and recovery](FLASHING.md).
 
+You can also update the keyboard application over the air through the receiver,
+with the same red-to-green key-matrix progress bar as the DFU/USB path. The
+installer programs each destination word once, so a changed image now survives
+the reboot. See [Updating and recovery](FLASHING.md#wireless-update) for the
+procedure.
+
 `recovery_usb_g4b.c` and `recovery_g4b.c` are disabled prototypes for the
 unavailable SteelSeries loader. They are not part of release firmware.
 
 The application also provides:
 
-- `spinor_g4b.c` / `flash_spinor_g4b.c` — the external FM25Q08A SPI-NOR (1 MiB,
+- `spinor_g4b.c` / `flash_spinor_g4b.c`: the external FM25Q08A SPI-NOR (1 MiB,
   SPIM0, bit-banged CS P0.26), freed by the bootloader swap. `spinor_g4b.c` is
   the direct-register access (read/erase/page-program); `flash_spinor_g4b.c`
   wraps it as a Zephyr **flash device** (`apex,g4b-spinor`, gated on
@@ -122,19 +130,18 @@ The application also provides:
   lock stops a settings write on another Zephyr work item from interrupting a
   two-part scanner transfer or the paced startup replay. Settings and bonds
   survive application updates and power cycles.
-- `updater_g4b.c` — retained legacy source for the pre-swap SteelSeries loader.
+- `updater_g4b.c`: retained legacy source for the pre-swap SteelSeries loader.
   It is disabled in the current build and its HID node is absent because the
   Adafruit bootloader does not consume SteelSeries' staged SPI-NOR image.
 
 ## The radio
 
 `radio_g4b.c` releases the Bluetooth controller when the mode switch selects
-dongle. It is disabled in release firmware and does not provide a radio link
-by itself. The old stock-protocol transmitter and raw scanner-report queue have
+dongle. The old stock-protocol transmitter and raw scanner-report queue have
 been removed. The [custom transport](../dongle/README.md#keyboard-input-development)
-sends ZMK's processed keyboard and media reports in development builds. It is
-not enabled in release firmware; gamepad, Studio and wireless updates remain
-unfinished.
+sends ZMK's processed keyboard and media reports, and it ships in release
+firmware alongside BLE. It carries keyboard and media input plus wireless
+updates. Studio itself still runs over USB, not the radio link, though.
 The recovered protocol and PHY details are in
 [reverse-engineering/RADIO.md](reverse-engineering/RADIO.md).
 

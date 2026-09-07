@@ -49,7 +49,7 @@ application staged itself again. The bootloader implementation is in
 
 Fn+X cycles the standard ZMK lighting mode plus eleven custom effects at up to
 200 Hz. The choice persists with the other keyboard settings, and every effect
-obeys the same 0–100% brightness control and hard ceiling.
+obeys the same 0-100% brightness control and hard ceiling.
 
 **Shockwave** launches a coloured ring from the position of each pressed key.
 **Digital Rain** runs several independent moving trails, while **Prismatic Ink**
@@ -62,7 +62,7 @@ The optional gamepad maps Hall depth from W/A/S/D to five DirectInput axes:
 D−A steering on X and Rx, S−W on Y, W throttle on Z, and S brake on Rz. It is
 toggled with `Fn`+`Z` and is not exposed over Bluetooth.
 
-Matching radio builds also forward these axes through the dongle. Direct keyboard
+In 2.4 GHz (dongle) mode the firmware also forwards these axes through the dongle. Direct keyboard
 USB takes priority when connected to a computer. While controller output is
 enabled and connected, the scanner stays at its active cadence and the keyboard
 does not enter deep sleep. Switch it off with `Fn`+`Z` to restore normal idle
@@ -134,7 +134,7 @@ The wireless power controls have different USB conditions:
 - The optional analog gamepad stops requesting `0xA2` depth samples when it is
   off or neither USB power nor a selected radio connection is available.
 
-The nRF uses its DC/DC converter. Bluetooth requests a 7.5–15 ms connection
+The nRF uses its DC/DC converter. Bluetooth requests a 7.5-15 ms connection
 interval with peripheral latency 30; the host chooses the final values.
 
 nRF System OFF uses `CONFIG_APEX_G4B_SLEEP_MS` (15 minutes in the current build).

@@ -126,8 +126,10 @@ also uses hardware AES after Bluetooth shuts down; Bluetooth-mode boots retain
 software AES so the two stacks cannot use the peripheral at the same time.
 
 See [the receiver application](../../dongle/README.md) for the build and shell
-instructions. The keyboard test build retains the v0.1.4 settings and storage
-layout. Its bootloader has not changed.
+instructions. The release keyboard image retains the v0.1.4 settings and storage
+layout. Its bootloader now handles the wireless-update promote and copy, and
+programs each destination word once instead of reprogramming it up to 16 times
+between erases.
 
 ## Why a 1 kHz timer wasn't enough
 
@@ -185,7 +187,6 @@ from Bluetooth. A shortened sleep test confirmed held-key wake and switching
 between Bluetooth and dongle mode. Battery-current, interference and host-suspend
 measurements remain separate work.
 
-Keyboard and media forwarding don't establish full USB feature parity. Studio,
-analogue controller forwarding and full-size wireless application updates remain
-further work. The proposed two-image external-flash migration isn't installed.
+Keyboard and media forwarding don't establish full USB feature parity. Studio
+and analogue controller forwarding remain further work. The proposed two-image external-flash migration isn't installed.
 Keyboard bootloader updates and emergency recovery remain wired.

@@ -1,28 +1,28 @@
 # Wireless keyboard updates
 
-**Experimental.** Changed-image installation now works on hardware, but the
-feature has had limited testing; keep a wired recovery path available.
-Bootloader updates and emergency recovery still need USB or SWD.
+Wireless changed-image updates work and are validated on hardware. Testing is
+still limited, so keep a wired recovery path available. Bootloader updates and
+emergency recovery still need USB or SWD.
 
 ## Hardware results
 
-- A complete 402,176-byte image transfers on battery in about 100–120 seconds
+- A complete 402,176-byte image transfers on battery in about 100-120 seconds
   (~3 KB/s over the radio). The earlier text-command transfer was abandoned
   because it took far too long.
 - Reinstalling the same image, and installing a *different* image, both pass
   verification, the internal copy, reboot and the keyboard's boot-health checks
   (state HEALTHY). An earlier bootloader corrupted changed images during the
   copy; see below.
-- Progress shows on the key matrix: a red bar fills left→right while an update
+- Progress shows on the key matrix: a red bar fills left to right while an update
   transfers and again while the bootloader copies it into internal flash, then
-  the whole board turns green when each step completes — the same indicator the
-  UF2 DFU path uses.
+  the whole board turns green when each step completes. It's the same indicator
+  the UF2 DFU path uses.
 
 ### The changed-image copy defect (fixed)
 
 An earlier bootloader flushed the Adafruit 4 KiB flash page cache after every
 256-byte write, so `flash_nrf5x_flush(false)` reprogrammed the whole page each
-time and each internal word was written up to sixteen times between erases —
+time and each internal word was written up to sixteen times between erases,
 beyond the nRF52 write-between-erase limit. The copy verified immediately but
 did not retain across a reboot, so a changed image booted corrupt and was
 rejected. Reinstalling the *same* image hid the defect because the installer
@@ -56,10 +56,11 @@ stock USB installer's smaller `0x6e000` layout is not supported here.
    `APEXBOOT`. Copy `bootloader_mbr.uf2` onto that drive. Wait for it to
    restart, then check `INFO_UF2.TXT` on `APEXBOOT`. If the keyboard returns
    to normal typing instead, use the same key combination to reopen the drive.
-3. Install a keyboard build with `CONFIG_APEX_G4B_WIRELESS_UPDATE=y` and a
-   receiver build with `dongle reconnect` and `keyboard` shell commands.
-   Copy the keyboard application's `.uf2` onto `APEXBOOT`. Update the receiver
-   through its separate `APEXDONGLE` drive as described in the
+3. Install the release keyboard image and the released receiver firmware. The
+   release keyboard image (`apex-pro-mini-wl-ab.uf2`, or `apex-zmk.uf2` from a
+   from-source build) already carries wireless update, so copy it onto
+   `APEXBOOT`. Update the receiver from the released `apex-dongle.zip` through
+   its separate `APEXDONGLE` drive, as described in the
    [receiver instructions](../dongle/README.md).
 4. Open the keyboard's USB shell and run:
 
@@ -143,9 +144,11 @@ Build the bootloader with:
 python tools/build_release.py --bootloader-only
 ```
 
-Append `--extra-conf apex-zmk-g4b/g4b_radio_update.conf` to the
-[radio keyboard build](../dongle/README.md). The option is off by default while
-hardware testing is in progress.
+The release keyboard image already carries wireless update. It's built by
+`python tools/build_release.py`, which appends `g4b_radio_update.conf`
+(`CONFIG_APEX_G4B_WIRELESS_UPDATE=y`) for you. If you're building the keyboard
+yourself instead, append `--extra-conf apex-zmk-g4b/g4b_radio_update.conf` to
+turn the feature on.
 
 The portable engine tests cover a full-size image, protected flash regions,
 partial writes and resets during installation, malformed images and filesystem
@@ -161,6 +164,6 @@ python update/test_bootloader_flash.py /path/to/bootloader.elf
 
 The first test needs a native C compiler. The ARM tests need `unicorn` and
 `pyelftools` installed in Python. `test_bootloader_flash.py` runs the real
-Adafruit page-cache code against a flash model that enforces the 1→0 program
+Adafruit page-cache code against a flash model that enforces the 1->0 program
 rule and counts writes per word between erases, so it exercises the install copy
 the mocked `test_bootloader.py` cannot.
