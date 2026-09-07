@@ -37,6 +37,10 @@ jobs:
         run: >-
           "$WORK_ROOT/zmk-upstream/.venv/bin/python" dongle/tests/test_gamepad.py
           --elf "$WORK_ROOT/dongle/apex-dongle/apex-receiver.elf"
+      - name: Test receiver keyboard commands
+        run: >-
+          "$WORK_ROOT/zmk-upstream/.venv/bin/python" dongle/tests/test_keyboard_shell.py
+          --elf "$WORK_ROOT/dongle/apex-dongle/apex-receiver.elf"
       - name: Build matching keyboard firmware
         run: >-
           python apex-zmk-g4b/build_g4b.py --stage 3 --usb-studio --kscan-ingest
@@ -48,6 +52,10 @@ jobs:
       - name: Test compiled NOR read loop
         run: >-
           "$WORK_ROOT/zmk-upstream/.venv/bin/python" apex-zmk-g4b/test_spinor_read.py
+          "$WORK_ROOT/build-repo-apex-zmk-g4b-wireless-idle-ab-v2/zephyr/zmk.elf"
+      - name: Test compiled keyboard radio shell
+        run: >-
+          "$WORK_ROOT/zmk-upstream/.venv/bin/python" apex-zmk-g4b/test_radio_shell.py
           "$WORK_ROOT/build-repo-apex-zmk-g4b-wireless-idle-ab-v2/zephyr/zmk.elf"
       - name: Upload receiver installer and firmware
         uses: actions/upload-artifact@v4

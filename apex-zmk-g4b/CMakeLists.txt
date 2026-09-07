@@ -54,6 +54,9 @@ endif()
 if(CONFIG_APEX_RADIO_HOPPING)
   zephyr_library_sources(../radio/src/apex_hop.c ../radio/src/apex_hop_link.c)
 endif()
+if(CONFIG_APEX_RADIO_SHELL)
+  zephyr_library_sources(src/shell_radio_g4b.c ../radio/src/apex_stream.c ../radio/src/apex_shell_link.c)
+endif()
 # The `apex` ZMK Studio RPC subsystem (heatmap etc.). Needs ZMK_STUDIO; gated
 # with the shell build for now since it shares the apex_control API. It includes
 # the nanopb-generated proto headers, which land in the app's binary dir (the top

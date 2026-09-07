@@ -26,6 +26,86 @@ LINK_K, LINK_D = 0x20009000, 0x2000a000
 
 
 class PacketTests(unittest.TestCase):
+    def stream_put(self, stream, data):
+        self.cpu.mem_write(DATA, data or b'\x00')
+        return self.call('apex_stream_put', stream, DATA, len(data))
+
+    def stream_pack(self, stream):
+        n = self.call('apex_stream_pack', stream, OUT)
+        return bytes(self.cpu.mem_read(OUT, n))
+
+    def stream_receive(self, stream, packet):
+        self.cpu.mem_write(IN, packet)
+        return self.call('apex_stream_receive', stream, IN, len(packet))
+
+    def stream_get(self, stream):
+        n = self.call('apex_stream_get', stream, DATA)
+        return bytes(self.cpu.mem_read(DATA, n))
+
+    def test_shell_stream_retries_and_backpressure(self):
+        self.call('apex_stream_reset', HOP_K)
+        self.call('apex_stream_reset', HOP_D)
+        self.assertEqual(self.stream_put(HOP_K, b'first'), 5)
+        first = self.stream_pack(HOP_K)
+        self.assertEqual(self.stream_receive(HOP_D, first), 5)
+        self.assertEqual(self.stream_receive(HOP_D, first), 0)
+        self.assertEqual(self.stream_put(HOP_K, b'second'), 0)
+        self.stream_receive(HOP_K, self.stream_pack(HOP_D))
+        self.assertEqual(self.stream_put(HOP_K, b'second'), 6)
+        second = self.stream_pack(HOP_K)
+        self.assertEqual(self.stream_receive(HOP_D, second), 0)
+        self.assertEqual(self.stream_get(HOP_D), b'first')
+        self.assertEqual(self.stream_receive(HOP_D, second), 6)
+        self.assertEqual(self.stream_get(HOP_D), b'second')
+        self.assertEqual(self.stream_receive(HOP_D, first), 0)
+        self.assertEqual(self.stream_get(HOP_D), b'')
+
+    def test_shell_stream_large_bidirectional_transfer(self):
+        self.call('apex_stream_reset', HOP_K)
+        self.call('apex_stream_reset', HOP_D)
+        for i in range(100):
+            down = bytes([i]) * 47
+            up = bytes([255-i]) * 47
+            self.assertEqual(self.stream_put(HOP_K, up), 47)
+            self.assertEqual(self.stream_put(HOP_D, down), 47)
+            a, b = self.stream_pack(HOP_K), self.stream_pack(HOP_D)
+            self.stream_receive(HOP_K, b)
+            self.stream_receive(HOP_D, a)
+            self.assertEqual(self.stream_get(HOP_K), down)
+            self.assertEqual(self.stream_get(HOP_D), up)
+            self.stream_receive(HOP_K, self.stream_pack(HOP_D))
+            self.stream_receive(HOP_D, self.stream_pack(HOP_K))
+
+    def test_shell_stream_rejects_invalid_without_mutation(self):
+        self.call('apex_stream_reset', HOP_K)
+        size = self.call('fixture_stream_size')
+        before = bytes(self.cpu.mem_read(HOP_K, size))
+        for bad in (b'', b'\x01', bytes([2,0,0,0,0,0]),
+                    bytes([1,1,0,0,0,0,65]), bytes([1,0,1,0,0,0]),
+                    bytes([1,1,2,0,0,0,65]), bytes([1,0,0,0,1,0]),
+                    bytes([1,48,1,0,0,0]) + b'a'*48):
+            self.assertLess(self.stream_receive(HOP_K, bad), 0)
+            self.assertEqual(bytes(self.cpu.mem_read(HOP_K, size)), before)
+
+    def test_shell_stream_exhaustion_and_session_reset(self):
+        self.call('apex_stream_reset', HOP_K)
+        self.assertLess(self.stream_put(HOP_K, b''), 0)
+        self.assertLess(self.stream_put(HOP_K, b'a'*48), 0)
+        self.call('fixture_stream_exhaust', HOP_K)
+        self.assertLess(self.stream_put(HOP_K, b'cmd'), 0)
+        self.call('apex_stream_reset', HOP_K)
+        self.assertEqual(self.stream_put(HOP_K, b'cmd'), 3)
+
+    def test_shell_packet_authentication(self):
+        payload = bytes([1, 3, 1, 0, 0, 0]) + b'cmd'
+        packet = self.encode(payload, packet_type=8)
+        bad = bytearray(packet)
+        bad[-1] ^= 1
+        self.assertLess(self.decode(bytes(bad)), 0)
+        self.assertEqual(self.decode(packet), len(payload))
+        self.assertEqual(bytes(self.cpu.mem_read(DATA, len(payload))), payload)
+        self.assertLess(self.decode(packet), 0)
+
     def test_gamepad_format_and_neutral(self):
         neutral = struct.pack('<5HB', 16384, 16384, 0, 0, 16384, 0)
         self.call('fixture_gamepad_neutral', DATA)
@@ -649,6 +729,7 @@ if __name__ == '__main__':
                str(radio / 'src/apex_packet.c'), str(radio / 'src/apex_connection.c'),
                str(radio / 'src/apex_input.c'),
                str(radio / 'src/apex_delivery.c'),
+               str(radio / 'src/apex_stream.c'),
                str(radio / 'src/apex_hop.c'),
                str(radio / 'src/apex_hop_link.c'),
                str(radio / 'tests/packet_fixture.c')]

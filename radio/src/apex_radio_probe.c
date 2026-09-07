@@ -7,6 +7,7 @@
 #include "apex_aes.h"
 #include "apex_hop_link.h"
 #include "apex_latency.h"
+#include "apex_shell_link.h"
 #include <string.h>
 #include <stdlib.h>
 #include <zephyr/kernel.h>
@@ -244,6 +245,9 @@ static bool gamepad_enabled;
 static bool gamepad_fresh;
 static uint32_t gamepad_sample_at;
 static uint32_t gamepad_rx_counter;
+#if IS_ENABLED(CONFIG_APEX_RADIO_SHELL)
+static uint32_t shell_poll_at;
+#endif
 
 bool apex_radio_input_selected(void) { return atomic_get(&input_selected) != 0; }
 
@@ -596,6 +600,17 @@ static int input_packet(uint8_t type, const uint8_t *data, size_t length, uint32
     BUILD_ASSERT(APEX_DELIVERY_BATCH_SIZE <= APEX_PACKET_PAYLOAD_MAX);
     uint32_t ack = 0;
     if (local_role == APEX_KEYBOARD) {
+#if IS_ENABLED(CONFIG_APEX_RADIO_SHELL)
+        if (type == APEX_PACKET_SHELL) {
+            struct apex_delivery_ack check;
+            if (length < APEX_DELIVERY_ACK_SIZE + APEX_STREAM_HEADER_SIZE ||
+                !apex_delivery_ack_unpack(data, APEX_DELIVERY_ACK_SIZE, &check)) return -EINVAL;
+            if (apex_shell_link_receive(data + APEX_DELIVERY_ACK_SIZE,
+                                        length - APEX_DELIVERY_ACK_SIZE) < 0) return -EINVAL;
+            type = APEX_PACKET_ACK;
+            length = APEX_DELIVERY_ACK_SIZE;
+        }
+#endif
         struct apex_delivery_ack status;
         if (type != APEX_PACKET_ACK || !apex_delivery_ack_unpack(data, length, &status)) return -EINVAL;
         k_spinlock_key_t key = k_spin_lock(&input_lock);
@@ -621,6 +636,19 @@ static int input_packet(uint8_t type, const uint8_t *data, size_t length, uint32
         apex_radio_update_leds(status.leds);
         return 0;
     }
+#if IS_ENABLED(CONFIG_APEX_RADIO_SHELL)
+    if (type == APEX_PACKET_SHELL) {
+        BUILD_ASSERT(APEX_DELIVERY_ACK_SIZE + APEX_STREAM_PACKET_MAX <= APEX_PACKET_PAYLOAD_MAX);
+        if (apex_shell_link_receive(data, length) < 0) return -EINVAL;
+        uint8_t reply[APEX_PACKET_PAYLOAD_MAX];
+        struct apex_delivery_ack status;
+        apex_radio_delivery_status(&status);
+        apex_delivery_ack_pack(&status, reply);
+        int n = apex_shell_link_pack(reply + APEX_DELIVERY_ACK_SIZE);
+        return apex_connection_encode(&connection, APEX_PACKET_SHELL, reply,
+                                      APEX_DELIVERY_ACK_SIZE + n, tx, sizeof(tx));
+    }
+#endif
     if (type == APEX_PACKET_GAMEPAD) {
         if (!apex_gamepad_valid(data, length)) return -EINVAL;
         /* The CCM replay window permits reordering; absolute axes must not. */
@@ -724,9 +752,11 @@ static int radio_start_immediate(uint8_t type)
     unsigned int key = irq_lock();
 #if HOP_ENABLED
     if (type == APEX_PACKET_INPUT || type == APEX_PACKET_INPUT_BATCH ||
-        type == APEX_PACKET_ACK || type == APEX_PACKET_KEEPALIVE || type == APEX_PACKET_GAMEPAD) {
+        type == APEX_PACKET_ACK || type == APEX_PACKET_KEEPALIVE || type == APEX_PACKET_GAMEPAD ||
+        type == APEX_PACKET_SHELL) {
         uint64_t now = radio_time_us();
-        bool window = type == APEX_PACKET_ACK ? apex_hop_link_reply_window(&hop_link, now) :
+        bool reply = type == APEX_PACKET_ACK || (type == APEX_PACKET_SHELL && local_role == APEX_RECEIVER);
+        bool window = reply ? apex_hop_link_reply_window(&hop_link, now) :
                                               apex_hop_link_input_window(&hop_link, now);
         if (!window ||
             apex_hop_link_channel(&hop_link, now) != (int)NRF_RADIO->FREQUENCY) {
@@ -942,6 +972,10 @@ static int new_session(void)
     completion_notified = 0;
     atomic_set(&input_progress, 0);
     if (local_role == APEX_RECEIVER) apex_radio_release();
+#if IS_ENABLED(CONFIG_APEX_RADIO_SHELL)
+    apex_shell_link_reset();
+    shell_poll_at = 0;
+#endif
 #endif
     uint8_t nonce[16];
     const struct device *rng = DEVICE_DT_GET(DT_NODELABEL(rng));
@@ -1257,6 +1291,8 @@ static void probe_thread(void *a, void *b, void *c)
                 if (queued) send_sequence = frames[count - 1].sequence;
                 k_spin_unlock(&input_lock, key);
                 uint8_t payload[APEX_DELIVERY_BATCH_SIZE];
+                uint8_t packet_type = count > 1 ? APEX_PACKET_INPUT_BATCH :
+                                      queued ? APEX_PACKET_INPUT : APEX_PACKET_GAMEPAD;
                 int length = count > 1 ? apex_delivery_batch_pack(frames, count, payload, sizeof(payload)) :
                              queued ? apex_input_pack(frames, payload, sizeof(payload)) : 1;
                 if (!queued) {
@@ -1269,12 +1305,19 @@ static void probe_thread(void *a, void *b, void *c)
                     else apex_gamepad_neutral(payload + 2);
                     k_spin_unlock(&input_lock, key);
                     length = APEX_GAMEPAD_PAYLOAD_SIZE;
+#if IS_ENABLED(CONFIG_APEX_RADIO_SHELL)
+                    if (k_uptime_get_32() - shell_poll_at >= 10) {
+                        shell_poll_at = k_uptime_get_32();
+                        length = apex_shell_link_pack(payload);
+                        packet_type = APEX_PACKET_SHELL;
+                    }
+#endif
                 }
                 if (length < 0) { atomic_or(&resync, RESET_QUEUE); goto wait_next; }
                 uint32_t encode_started = k_cycle_get_32();
                 n = count == 1 ? input_prepare_take(frames[0].sequence, tx) : 0;
                 if (!n) n = apex_connection_encode(&connection,
-                    count > 1 ? APEX_PACKET_INPUT_BATCH : queued ? APEX_PACKET_INPUT : APEX_PACKET_GAMEPAD,
+                    packet_type,
                     payload, length, tx, sizeof(tx));
                 if (queued) {
                     key = k_spin_lock(&input_lock);

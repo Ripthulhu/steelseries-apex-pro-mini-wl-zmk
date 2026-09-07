@@ -5,6 +5,46 @@ Build and pairing instructions are in [the receiver README](../dongle/README.md)
 The input test builds now use four-channel hopping. This remains development
 firmware; the 1 kHz input scheduler and wireless power measurements are unfinished.
 
+## Remote shell
+
+Packet type 8 carries commands and output through the authenticated radio
+session. The keyboard polls in otherwise-unused input slots, no more often than
+every 10 ms. Keyboard and media reports take priority. The receiver replies
+with the normal 11-byte input-delivery acknowledgement followed by a stream
+frame, so diagnostics do not delay notification of completed USB reports.
+
+Each stream frame contains a version byte (`1`), payload length, a 16-bit send
+sequence and a 16-bit acknowledgement, followed by up to 47 payload bytes.
+Integers are little-endian. Each direction holds one unacknowledged fragment;
+duplicates are ignored and a full receive buffer applies backpressure. Stream
+sequences reset with the encrypted session and cannot wrap within one session.
+Radio retries still use fresh CCM packet counters.
+
+The first payload byte identifies a command fragment (`1`), final command
+fragment (`2`), output (`3`) or result (`4`). Results contain a signed 32-bit
+return code. The keyboard assembles one command and runs its existing `apex`
+handler on a separate shell thread. Neither command execution nor waiting for
+output acknowledgements blocks the radio thread.
+
+Commands are limited to 127 printable ASCII characters and 16 KiB of output.
+The receiver abandons a request after 15 seconds and starts a new session to
+discard queued fragments. It reports an unknown outcome rather than retrying
+the command. Disconnecting cannot undo a command already executing, and the
+timeout does not forcibly terminate its handler. No log backend is attached.
+See [keyboard diagnostics](../dongle/README.md#keyboard-diagnostics-through-the-receiver)
+for usage.
+
+Host tests cover fragment retries, duplicates, backpressure, malformed frames,
+sequence exhaustion and session resets. The compiled keyboard-shell test checks
+command assembly, size limits, rejected input and partial-command cancellation.
+
+On 7 September 2026, battery snapshots and full radio counters came through
+with keyboard USB unplugged while the user typed normally. The input queue
+did not overflow and USB report errors remained zero. A 20-second monitor hit
+the 15-second request timeout; after it finished, another battery command
+succeeded without a reboot or reflash. Sustained input throughput with shell
+traffic has not been benchmarked.
+
 ## Analog reports
 
 Packet type 7 carries the gamepad state: format byte `1`, enabled byte `0` or

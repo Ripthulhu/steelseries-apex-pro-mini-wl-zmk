@@ -1,4 +1,13 @@
 # SPDX-License-Identifier: MIT
+config APEX_RADIO_SHELL
+    bool "Keyboard shell commands through the receiver"
+    default n
+    depends on SHELL && (APEX_G4B_RADIO_INPUT || APEX_RECEIVER_RADIO_INPUT)
+    help
+      Forward apex commands and their output through the authenticated radio
+      connection. Keyboard input has priority. Requests time out after 15 seconds
+      and output is limited to 16 KiB. Adds a keyboard shell thread; no log backend.
+
 config APEX_RADIO_THREAD_PRIORITY
     int "Radio transaction thread priority"
     range 0 14

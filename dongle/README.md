@@ -134,6 +134,39 @@ used for this is often `dialout`, depending on the distribution.
 These are local development IDs, not registered allocations for distribution.
 The USB serial number is stable, but the port name can change after an update.
 
+## Keyboard diagnostics through the receiver
+
+Open the receiver's serial shell as described above. With the keyboard awake
+and its switch in dongle mode, enter:
+
+```text
+keyboard battery
+keyboard radio
+keyboard gamepad
+```
+
+`keyboard` addresses the keyboard; `dongle` addresses the receiver. Enter
+`keyboard` by itself for a short command guide. These commands run the
+keyboard's existing `apex` handlers over the radio. The keyboard
+does not need a USB cable. Output starts with `[keyboard]` and ends with
+`[keyboard result: 0]` on success. Commands without the `keyboard` prefix, such
+as `dongle radio_test`, refer to the receiver itself.
+
+This also supports settings commands, for example
+`keyboard rt on 0.3`. Commands run once; a lost reply does not cause
+them to run again. If the connection drops, the receiver reports that the command
+may have run. Check its result before repeating a command that changes anything.
+Rebooting the keyboard or switching it to Bluetooth will interrupt the reply.
+
+Use the same command names and arguments as the keyboard's USB shell, replacing
+`apex` with `keyboard`. `keyboard radio` is the shorter name for `apex radio_test`.
+Only `apex` handlers are supported, with a 127-character internal command limit, 16 KiB
+of output and a 15-second timeout. Use short snapshots instead of long monitors.
+Pairing commands still require the keyboard's own USB shell.
+This is not an interactive keyboard terminal or a live log stream. Typing takes
+priority over diagnostic traffic. Both devices need shell-capable radio builds;
+these are included in the radio build commands above.
+
 ## Pair over USB
 
 Connect both devices by USB and close their serial terminals. Replace the two

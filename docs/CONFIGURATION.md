@@ -63,6 +63,20 @@ enable one of those test features.
 to external flash only after a fatal fault, then resets so A/B recovery can do
 its job. It does not stream logs or run in the background.
 
+## Radio diagnostics
+
+The separate keyboard and receiver radio builds enable
+`CONFIG_APEX_RADIO_SHELL=y`. This allows `keyboard battery`, `keyboard radio`
+and other keyboard commands in the
+receiver's serial terminal to run a command on the keyboard. It requires the
+shell and radio-input support on both devices; it is not enabled in the normal
+keyboard release. See [the receiver guide](../dongle/README.md#keyboard-diagnostics-through-the-receiver).
+
+On the keyboard this adds a shell thread and fixed-size transfer buffers,
+using about 5.8 KiB more RAM than the same radio build without it. The Bluetooth
+shell remains disabled. Set `CONFIG_APEX_RADIO_SHELL=n` in a local override on
+both devices to remove the remote shell without removing their USB consoles.
+
 ## USB data path
 
 `CONFIG_APEX_G4B_USB_DATA_VBUS_GATE` is **on by default**. It drives the U10 USB

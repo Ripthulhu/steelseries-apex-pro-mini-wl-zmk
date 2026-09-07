@@ -11,6 +11,9 @@
 #endif
 
 int receiver_usb_init(void);
+#if IS_ENABLED(CONFIG_APEX_RADIO_SHELL)
+int receiver_keyboard_command(const struct shell *sh, size_t argc, char **argv);
+#endif
 #if IS_ENABLED(CONFIG_APEX_RECEIVER_RADIO_INPUT)
 int receiver_hid_init(void);
 int receiver_hid_benchmark(const struct shell *sh, size_t argc, char **argv);
@@ -88,6 +91,9 @@ SHELL_STATIC_SUBCMD_SET_CREATE(dongle_commands,
     SHELL_CMD_ARG(crypto_test, NULL, "Run packet crypto checks locally; no radio traffic.", receiver_crypto_test, 1, 0),
     SHELL_SUBCMD_SET_END);
 SHELL_CMD_REGISTER(dongle, &dongle_commands, "Apex receiver commands.", NULL);
+#if IS_ENABLED(CONFIG_APEX_RADIO_SHELL)
+SHELL_CMD_ARG_REGISTER(keyboard, NULL, "Keyboard commands over radio.", receiver_keyboard_command, 1, 16);
+#endif
 
 int main(void)
 {

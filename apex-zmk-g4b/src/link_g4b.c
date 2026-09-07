@@ -2156,6 +2156,10 @@ static bool s3_sleep_failed;
 static void s3_sleep_maybe(void)
 {
     bool powered = false;
+#if IS_ENABLED(CONFIG_APEX_RADIO_SHELL)
+    extern bool g4b_radio_shell_busy(void);
+    if (g4b_radio_shell_busy()) return;
+#endif
 
     if (s3_sleep_failed || s3_gamepad_streaming()) {
         return;
