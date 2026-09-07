@@ -5,9 +5,11 @@ Wireless. It receives keyboard and media reports from ZMK over an encrypted
 2.4 GHz link and forwards them over USB. The keymap stays on the keyboard.
 It does not use the SteelSeries protocol or pair through GG.
 
-This is development firmware. Both devices need matching radio builds; the
-normal keyboard release UF2 does not include this protocol. Studio and wireless
-updates are not implemented on the receiver.
+The release keyboard image carries this 2.4 GHz link alongside BLE, so a normal
+release keyboard pairs with the receiver directly — the mode is chosen by the
+hardware switch. The receiver also relays wireless keyboard updates from
+`tools/dongle.py`. Both devices still need matching radio builds; use the
+keyboard and receiver from the same release or CI run.
 
 ## Analog controller
 
@@ -39,8 +41,9 @@ Ready-to-flash files are available under **Build keyboard and receiver** in
 [GitHub Actions](https://github.com/Ripthulhu/steelseries-apex-pro-mini-wl-zmk/actions/workflows/radio.yml).
 Choose a successful run and download both `apex-dongle` and
 `apex-keyboard-radio` from that same run. GitHub requires a login for these
-development downloads. Tagged releases also publish the receiver ZIP and a
-separate `apex-keyboard-radio.uf2`; the normal keyboard UF2 is a different build.
+development downloads. Tagged releases publish the receiver installer
+(`apex-dongle.zip`) next to the keyboard; the release keyboard is the matching
+2.4 GHz build.
 
 ## Build both applications
 

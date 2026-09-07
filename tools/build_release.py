@@ -99,7 +99,6 @@ def verify_release_config(artifact_dir: Path) -> None:
         "APEX_G4B_AB_AUTOSTAGE": "y",
         "APEX_G4B_AB_CRASHTEST": "n",
         "APEX_G4B_COREDUMP": "y",
-        "APEX_G4B_DONGLE_RADIO": "n",
         "APEX_G4B_EVIDENCE_USB": "n",
         "APEX_G4B_KBD_CAPTURE": "n",
         "APEX_G4B_KBD_TELEMETRY": "n",
@@ -172,6 +171,14 @@ def verify_release_config(artifact_dir: Path) -> None:
         "APEX_G4B_SHELL",
         "APEX_G4B_USB_DATA_VBUS_GATE",
         "APEX_G4B_FN_OVERLAY",
+        # The 2.4 GHz receiver link and wireless update ship in the release
+        # keyboard alongside BLE; the mode is chosen by the hardware switch.
+        "APEX_G4B_RADIO_PAIRING",
+        "APEX_G4B_DONGLE_RADIO",
+        "APEX_G4B_RADIO_PROBE",
+        "APEX_G4B_RADIO_INPUT",
+        "APEX_G4B_DONGLE_SLEEP",
+        "APEX_G4B_WIRELESS_UPDATE",
     }
     unexpected = sorted(
         name for name, value in config.items()
@@ -209,15 +216,24 @@ def recipe_hash() -> str:
 
 
 def build_app(work_root: Path, python: Path, extra_conf: list[Path]) -> Path:
-    release_shell_conf = ROOT / "apex-zmk-g4b" / "g4b_shell_release.conf"
+    # The release keyboard is a single image carrying BLE and the 2.4 GHz
+    # receiver link, wireless update, and the release shell; the active mode is
+    # chosen by the hardware switch. g4b_release_size.conf drops unused
+    # floating-point printf so the image stays below the bootloader self-update
+    # staging floor (0x63000).
+    release_confs = [
+        ROOT / "apex-zmk-g4b" / "g4b_shell_release.conf",
+        ROOT / "apex-zmk-g4b" / "g4b_radio_input.conf",
+        ROOT / "apex-zmk-g4b" / "g4b_radio_update.conf",
+        ROOT / "apex-zmk-g4b" / "g4b_release_size.conf",
+    ]
     command: list[str | Path] = [
         python, ROOT / "apex-zmk-g4b" / "build_g4b.py", "--stage", "3",
         "--usb-studio", "--kscan-ingest", "--persistent", "--plain-image",
-        "--wireless-idle", "--ab-rollback", "--shell",
-        "--extra-conf", release_shell_conf, "--work-root", work_root,
+        "--wireless-idle", "--ab-rollback", "--shell", "--work-root", work_root,
     ]
-    for path in extra_conf:
-        command.extend(("--extra-conf", path))
+    for conf in (*release_confs, *extra_conf):
+        command.extend(("--extra-conf", conf))
     run(command)
     artifact_dir = work_root / "artifacts-repo-apex-zmk-g4b-wireless-idle-ab-v2"
     if not artifact_dir.is_dir():
@@ -313,18 +329,17 @@ def clean_release_directory(release_dir: Path) -> None:
             asset = release_dir / f"apex-pro-mini-wl-{profile}{suffix}"
             if asset.exists():
                 asset.unlink()
-    bootloader_update = release_dir / "apex-pro-mini-wl-bootloader-update.uf2"
-    if bootloader_update.exists():
-        bootloader_update.unlink()
-    manifest = release_dir / "RELEASE-SHA256SUMS.txt"
-    if manifest.exists():
-        manifest.unlink()
+    for name in ("apex-pro-mini-wl-bootloader-update.uf2", "RELEASE-SHA256SUMS.txt",
+                 "apex-dongle.zip"):
+        asset = release_dir / name
+        if asset.exists():
+            asset.unlink()
     leftovers = sorted(path.name for path in release_dir.iterdir())
     if leftovers:
         fail(f"release directory contains unrelated files: {leftovers}")
 
 
-def verify_release_directory(release_dir: Path) -> None:
+def verify_release_directory(release_dir: Path, dongle: bool = False) -> None:
     expected = {
         "RELEASE-SHA256SUMS.txt",
         "apex-pro-mini-wl-ab",
@@ -332,6 +347,8 @@ def verify_release_directory(release_dir: Path) -> None:
         "apex-pro-mini-wl-ab.zip",
         "apex-pro-mini-wl-bootloader-update.uf2",
     }
+    if dongle:
+        expected |= {"apex-dongle.zip"}
     actual = {path.name for path in release_dir.iterdir()}
     if actual != expected:
         fail(
@@ -437,6 +454,20 @@ def package(artifact_dir: Path, boot_build: Path,
     return bundle, [update, bootloader_update, archive]
 
 
+def build_dongle_bundle(work_root: Path, python: Path, upstream: Path,
+                        release_dir: Path) -> list[Path]:
+    """Build the wireless receiver installer bundle (receiver firmware, its
+    bootloader, and the stock USB installer), copy it into the release directory
+    and return the added asset path. The release keyboard is already the matching
+    2.4 GHz build, so nothing more is needed here."""
+    dongle_out = work_root / "dongle"
+    run([python, ROOT / "tools" / "build_dongle_bundle.py",
+         "--workspace", upstream, "--output", dongle_out])
+    dongle_zip = release_dir / "apex-dongle.zip"
+    copy_release_file(dongle_out / "apex-dongle.zip", dongle_zip)
+    return [dongle_zip]
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--work-root", type=Path)
@@ -456,6 +487,13 @@ def parse_args() -> argparse.Namespace:
         metavar="FILE",
         help="append a Kconfig fragment after the release configuration",
     )
+    parser.add_argument(
+        "--dongle",
+        action="store_true",
+        help="also build the wireless receiver installer bundle (apex-dongle.zip) "
+             "and add it to the release directory; the release keyboard is already "
+             "the matching 2.4 GHz build",
+    )
     return parser.parse_args()
 
 
@@ -474,6 +512,9 @@ def main() -> int:
     sdk = upstream / ".zephyr-sdk"
     run([python, ROOT / "tools" / "verify_release.py", "--work-root", work_root,
          "--dependencies-only"])
+    if args.dongle and (args.bootloader_only or args.installer_bootloader or
+                        args.skip_bootloader):
+        fail("--dongle requires a full release build")
     if args.bootloader_only:
         if args.skip_bootloader or args.installer_bootloader or args.extra_conf:
             fail("--bootloader-only cannot be combined with other build options")
@@ -512,6 +553,8 @@ def main() -> int:
     release_dir = work_root / "release"
     clean_release_directory(release_dir)
     _, release_assets = package(artifact_dir, boot_build, work_root, python)
+    if args.dongle:
+        release_assets += build_dongle_bundle(work_root, python, upstream, release_dir)
     release_manifest = release_dir / "RELEASE-SHA256SUMS.txt"
     release_manifest.write_text(
         "\n".join(
@@ -520,7 +563,7 @@ def main() -> int:
         encoding="ascii",
         newline="\n",
     )
-    verify_release_directory(release_dir)
+    verify_release_directory(release_dir, dongle=args.dongle)
     print(f"Release checksums: {release_manifest}")
     print("A/B release firmware built and verified. Nothing was flashed.")
     return 0

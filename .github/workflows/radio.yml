@@ -50,11 +50,14 @@ jobs:
           python apex-zmk-g4b/build_g4b.py --stage 3 --usb-studio --kscan-ingest
           --persistent --plain-image --wireless-idle --ab-rollback --shell
           --extra-conf apex-zmk-g4b/g4b_shell_release.conf
-          --extra-conf apex-zmk-g4b/g4b_radio_input.conf --work-root "$WORK_ROOT"
+          --extra-conf apex-zmk-g4b/g4b_radio_input.conf
+          --extra-conf apex-zmk-g4b/g4b_radio_update.conf
+          --extra-conf apex-zmk-g4b/g4b_release_size.conf --work-root "$WORK_ROOT"
       - name: Build and test keyboard update bootloader
         run: |
           python tools/build_release.py --work-root "$WORK_ROOT" --bootloader-only
           "$WORK_ROOT/zmk-upstream/.venv/bin/python" update/test_bootloader.py "$WORK_ROOT"/release-deps/adafruit-boot-*/_build_apex_release/bootloader.elf
+          "$WORK_ROOT/zmk-upstream/.venv/bin/python" update/test_bootloader_flash.py "$WORK_ROOT"/release-deps/adafruit-boot-*/_build_apex_release/bootloader.elf
       - name: Test radio protocol
         run: '"$WORK_ROOT/zmk-upstream/.venv/bin/python" radio/tests/test_packet.py --workspace "$WORK_ROOT/zmk-upstream" --output "$WORK_ROOT/radio-tests"'
       - name: Test wireless update engine and image validation
