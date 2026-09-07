@@ -26,6 +26,38 @@ LINK_K, LINK_D = 0x20009000, 0x2000a000
 
 
 class PacketTests(unittest.TestCase):
+    def test_gamepad_format_and_neutral(self):
+        neutral = struct.pack('<5HB', 16384, 16384, 0, 0, 16384, 0)
+        self.call('fixture_gamepad_neutral', DATA)
+        self.assertEqual(bytes(self.cpu.mem_read(DATA, 11)), neutral)
+        payload = bytes([1, 1]) + neutral
+        self.cpu.mem_write(DATA, payload)
+        self.assertEqual(self.call('fixture_gamepad_valid', DATA, 13), 1)
+        for length in (0, 1, 12, 14):
+            self.assertEqual(self.call('fixture_gamepad_valid', DATA, length), 0)
+        for index, value in ((0, 2), (1, 2), (3, 128), (5, 128), (7, 128), (9, 128), (11, 128)):
+            bad = bytearray(payload)
+            bad[index] = value
+            self.cpu.mem_write(DATA, bytes(bad))
+            self.assertEqual(self.call('fixture_gamepad_valid', DATA, 13), 0)
+
+    def test_gamepad_counter_order(self):
+        self.cpu.mem_write(DATA, struct.pack('<I', 0))
+        for counter, expected in ((1, 1), (3, 1), (2, 0), (3, 0), (4, 1), (0xffffffff, 1), (1, 0)):
+            self.assertEqual(self.call('fixture_gamepad_newer', counter, DATA), expected)
+        self.cpu.mem_write(DATA, struct.pack('<I', 0))
+        self.assertEqual(self.call('fixture_gamepad_newer', 1, DATA), 1)
+
+    def test_gamepad_ccm_and_replay(self):
+        payload = bytes([1, 1]) + struct.pack('<5HB', 0, 32767, 12345, 0, 16384, 255)
+        wire = self.encode(payload, packet_type=7)
+        bad = bytearray(wire)
+        bad[18] ^= 1
+        self.assertLess(self.decode(bytes(bad)), 0)
+        self.assertEqual(self.decode(wire), 13)
+        self.assertEqual(bytes(self.cpu.mem_read(DATA, 13)), payload)
+        self.assertLess(self.decode(wire), 0)
+
     def setUp(self):
         self.cpu = Uc(UC_ARCH_ARM, UC_MODE_THUMB | UC_MODE_MCLASS)
         self.cpu.mem_map(0, 0x80000)

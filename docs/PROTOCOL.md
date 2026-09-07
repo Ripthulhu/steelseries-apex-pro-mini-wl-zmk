@@ -4,6 +4,10 @@ This page documents the STM32 scanner link, RGB controller, stock USB updater,
 and recovery entry. The information comes from stock-firmware disassembly and
 bus captures. Unresolved fields are marked as such.
 
+For the experiments behind these findings, see
+[the scanner investigation](reverse-engineering/SCANNER.md) and
+[stock USB updates](reverse-engineering/STOCK_USB.md).
+
 ## The STM32 scanner link
 
 The nRF talks to the STM32 over SPIM3 as master, at 4 Mbit/s, SPI mode 0, MSB
@@ -72,9 +76,9 @@ The 59 frames are two near-identical programming passes bracketing the enable:
 | 3–8 | `0x30`,`0x33` ×3 pairs | Per-key actuation + secondary threshold tables |
 | 9 | `0x34` | Table boundary / commit marker |
 | 10–12 | `0x35` ×3 | Per-key rapid-trigger sensitivity (chunked over the 70 keys) |
-| 13–24 | `0x36` ×12 | Per-key **neighbour-adjacency graph**: a 9-byte, `0xFF`-terminated list of each key's grid neighbours (6 keys/frame). Written to `SB+0x4d7+key*9`; two readers (`~0x08007cf4` set / `~0x08007b40` clear) build a live neighbour graph the scanner uses for **neighbour-aware key filtering** (rollover / adjacent-key resolution). It is **logical adjacency, not crosstalk** — measured on hardware, pressing a key shifts *zero* neighbour Hall readings (`apex halldump` diff). |
+| 13–24 | `0x36` ×12 | Nine-byte logical neighbour records, six keys per frame. Readers near `0x08007CF4` and `0x08007B40` update key-state links. A held-G test changed other Hall samples by at most four counts. See [the scanner investigation](reverse-engineering/SCANNER.md#the-neighbour-table-isnt-magnetic-compensation). |
 | 25–28 | `0x37` ×4 | Per-key **signed actuation trim** + enable bit (`37 <count> [idx, val, flag]…`). The `val` byte is stored at `SB+0x491+key` and the enable bit in the `SB+0x488` bitmap; at scan time (`~0x08007984`) it is read `sxtb` (signed) and, if the key's enable bit is set, **added as an offset into the actuation travel calc** (`0x0800d3e0` table). Stock ships a uniform `0x14` (+20) with every key enabled — a fine per-key offset on top of the global `0x30`/`0x33` threshold. |
-| 29 | `0x38 f4 01` | Scan timing/rate = `0x01F4` (500) |
+| 29 | `0x38 f4 01` | Configuration scalar = `0x01F4` (500); not a demonstrated 500 Hz scan rate |
 | 30 | `0x20 01 01` | Scanner state/enable → replies `20 00` |
 | 31–57 | (repeat 3–29) | Second pass; the `0x30`/`0x33` frames carry a `0x20` marker in byte 3 |
 | 58 | `0x20 01 01` | Enable again → now replies `20 02 02` — the state has advanced to configured |
@@ -89,19 +93,18 @@ actuation/rapid-trigger points rather than the stock capture's defaults, while
 every other byte still has to echo exactly. **Never** let `0x32` into this stream
 — it commits calibration to the STM32's flash (see below).
 
-**The config is constructed, not blindly replayed.** `apex-zmk-g4b/build_scanner_config.py`
-rebuilds all 59 frames from a decoded, named model — actuation `{press,release}`
+`apex-zmk-g4b/build_scanner_config.py` reconstructs the 59 captured transmit
+frames from parameters and retained records: actuation `{press,release}`
 pairs, the rapid-trigger table, the per-key `0x37` default (`0x14`), the `0x38`
-debounce (`500`), the `0x36` crosstalk-neighbour topology, and the `0x90`/`0xA4`/
-`0x20`/`0xA1` control frames — including the exact fill conventions (config frames
+scalar (`500`), the `0x36` logical neighbour topology, and the `0x90`/`0xA4`/
+`0x20`/`0xA1` control frames, including the fill conventions (config frames
 carry the `{press,release}` pattern in their unused tail; `0x34` masks six bytes;
 the pass-2 `0x30`/`0x33` frames carry a `0x20` marker in byte 3). It reproduces the
-frozen capture **byte-for-byte**, and `tools/verify_release.py` runs it with
-`--check` so any drift — a changed capture or an incomplete decode — fails the
-build. So every byte the firmware sends to the scanner is understood and derived,
-with the capture kept only as the frozen reference to verify against. The one piece
-that is empirical rather than computed is the `0x36` topology (physical PCB magnetic
-coupling); it is a named, per-key neighbour table, not an opaque blob.
+frozen capture byte for byte, and `tools/verify_release.py` runs it with
+`--check` to catch disagreement. The `0x36` records are read from that capture,
+not independently generated from geometry. Matching bytes doesn't prove every
+field's meaning. The records describe a logical neighbour graph, not measured
+magnetic coupling.
 
 ### The key report (`0xA1`)
 
@@ -254,7 +257,7 @@ active scanner selects mode 0, hard-stops scanning, and normally replies
 `20 03 <period>` changes the alternate scan period without stopping the
 scanner. The period is a one-byte millisecond value, so 255 ms is the maximum.
 It remains able to detect a key and raise attention, and the setting is held in
-RAM only. In the release build this is used only on battery in Bluetooth mode:
+RAM only. This is used on battery in Bluetooth and custom dongle mode:
 50 ms after five seconds without a key event, then 255 ms after one minute. A
 key change returns the scanner to its normal cadence; the Nordic also sends
 `20 03 01` once attention is clear.
@@ -295,7 +298,8 @@ Bring-up, taken from the stock init:
 | function (`0x52`) | `0x00` | `0x09` | configuration: out of software shutdown |
 
 Set current and scaling first, come out of shutdown last, then write PWM values.
-A hardware test confirmed straight R/G/B order in consecutive registers.
+Later read-back and open-channel tests confirmed B/G/R order in consecutive
+registers. See [the RGB investigation](reverse-engineering/RGB_CONTROLLER.md).
 
 ## Vendor USB firmware update
 
@@ -320,11 +324,12 @@ bytes are staged unchanged in the external SPI flash from `0x014000`; each
 write is CRC-checked. On reset, the factory loader validates that staged image
 and applies it to the internal application slot at `0x1C000`–`0x67000`.
 
-From the normal application, a feature report (`02 00 10` on the updater
-interface) asks the app to jump to the loader — which is how the stock software
-enters recovery on demand. The open application does not implement this vendor
-report; it enters `APEXBOOT` with the key combination or its dedicated serial
-interface.
+The generic `02 00 10` feature report did not establish recovery entry on the
+stock keyboard. GG's device definitions instead describe file updates against
+both the normal and recovery PIDs, with reset after writing. Don't treat that
+packet as a tested entry command. See [the host-side investigation](reverse-engineering/STOCK_USB.md).
+The open application enters `APEXBOOT` through its key combination or dedicated
+serial interface.
 
 ## Recovery entry
 

@@ -3,6 +3,10 @@
 #define APEX_RADIO_INPUT_H
 #include "apex_input.h"
 #include "apex_delivery.h"
+#include "apex_gamepad.h"
+bool apex_radio_input_selected(void);
+void apex_radio_gamepad_publish(bool enabled, const uint8_t *report);
+void apex_radio_gamepad_receive(bool enabled, const uint8_t *report);
 int apex_radio_queue_report(uint8_t type, const uint8_t *data, size_t length);
 void apex_radio_input_select(bool selected);
 bool apex_radio_input_connected(void);

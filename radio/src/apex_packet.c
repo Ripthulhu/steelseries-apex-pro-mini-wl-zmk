@@ -63,7 +63,7 @@ static void make_nonce(uint8_t nonce[13], const uint8_t *packet)
 
 static int valid_type(uint8_t type)
 {
-    return type >= APEX_PACKET_INPUT && type <= APEX_PACKET_INPUT_BATCH;
+    return type >= APEX_PACKET_INPUT && type <= APEX_PACKET_GAMEPAD;
 }
 
 int apex_packet_encode(struct apex_session *s, uint8_t type, const uint8_t *payload,

@@ -45,7 +45,7 @@ enables and checks A/B recovery. The finished bundle includes
 | `CONFIG_ZMK_BATTERY_REPORT_INTERVAL` | `60` | Seconds between battery updates |
 | `CONFIG_APEX_G4B_CHARGE_STOP_PCT` | `80` | Stop-charging threshold |
 | `CONFIG_APEX_G4B_CHARGE_RESUME_PCT` | `72` | Resume-charging threshold |
-| `CONFIG_APEX_G4B_GAMEPAD` | `y` | USB analog gamepad interface for W/A/S/D |
+| `CONFIG_APEX_G4B_GAMEPAD` | `y` | W/A/S/D analog gamepad over USB, or through the dongle in radio builds |
 
 The scanner period is stored in one byte, so 255 ms is its limit. These slower
 periods apply only on battery in Bluetooth mode. USB keeps the scanner at full
@@ -102,6 +102,18 @@ selects the legacy USB stack, while this keyboard uses Zephyr's current USB
 device stack.
 
 ## Settings to leave alone
+
+The generic flash shell uses `CONFIG_FLASH_SHELL_BUFFER_SIZE=0x400` (1 KiB).
+It allocates two buffers, so the former 4 KiB setting consumed 8 KiB of RAM.
+Read/test commands using those buffers now accept at most 1 KiB per operation.
+Use smaller consecutive reads for a larger range, or `flash load` for streamed
+writes. The keyboard's update, recovery and settings drivers don't use these
+shell buffers. You can override the value in a diagnostic build if needed.
+
+The external NOR driver also uses a separate 1 KiB read buffer. Larger requests
+are split into consecutive SPI reads. This doesn't change flash addresses,
+record formats or the amount a caller can read, but adds transactions to bulk
+reads. Its buffer no longer reserves space for an entire 4 KiB dump record.
 
 Do not override the following in a normal local build:
 

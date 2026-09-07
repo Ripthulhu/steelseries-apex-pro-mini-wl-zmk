@@ -129,7 +129,7 @@
     <text class="note" x="18" y="62">I / O: shallower / deeper actuation</text>
     <text class="note" x="18" y="86">T: rapid trigger on or off</text>
     <text class="note" x="18" y="110">Q: cycle rapid-trigger reset distance</text>
-    <text class="note" x="18" y="134">Z: USB analog gamepad on or off</text>
+    <text class="note" x="18" y="134">Z: Analog gamepad on or off</text>
   </g>
   <g transform="translate(672 576)">
     <rect class="panel" width="312" height="174" rx="14"/>

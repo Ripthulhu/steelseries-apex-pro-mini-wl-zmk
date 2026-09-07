@@ -58,9 +58,15 @@ only effects that request Hall depth samples.
 
 ## Analog gamepad
 
-The optional USB gamepad maps Hall depth from W/A/S/D to five DirectInput axes:
+The optional gamepad maps Hall depth from W/A/S/D to five DirectInput axes:
 D−A steering on X and Rx, S−W on Y, W throttle on Z, and S brake on Rz. It is
 toggled with `Fn`+`Z` and is not exposed over Bluetooth.
+
+Matching radio builds also forward these axes through the dongle. Direct keyboard
+USB takes priority when connected to a computer. While controller output is
+enabled and connected, the scanner stays at its active cadence and the keyboard
+does not enter deep sleep. Switch it off with `Fn`+`Z` to restore normal idle
+power savings. RGB still follows its usual timeout.
 
 Game support varies. Axis assignments may need to be remapped per game, and
 games that reject simultaneous keyboard and controller input may need a mod or
@@ -68,8 +74,8 @@ may not work well with this mode at all.
 
 The scanner returns all four samples in one `0xA2` response. Adjacent keys had
 different measured travel ranges, so the firmware learns rest and bottom-out
-per key instead of sharing fixed limits. The gamepad was tested on Windows with
-continuous axis movement while the normal keyboard interface remained active.
+per key instead of sharing fixed limits. Gradual axis movement has been tested
+on Windows through both direct USB and the dongle, with normal typing available.
 
 ## Battery charge limit
 
@@ -125,8 +131,8 @@ The wireless power controls have different USB conditions:
   until VBUS appears.
 - The BQ25895 ADC runs on demand at the battery-report interval instead of
   converting continuously.
-- The optional analog gamepad stops requesting `0xA2` depth samples when USB is
-  absent.
+- The optional analog gamepad stops requesting `0xA2` depth samples when it is
+  off or neither USB power nor a selected radio connection is available.
 
 The nRF uses its DC/DC converter. Bluetooth requests a 7.5–15 ms connection
 interval with peripheral latency 30; the host chooses the final values.

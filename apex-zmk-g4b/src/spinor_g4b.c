@@ -36,11 +36,11 @@
 #define G4B_NOR_SPIM_M2   0x20000000u /* 2 Mbit/s, conservative; UART-bound anyway */
 #define G4B_NOR_WAIT_CYC  (64000000u / 10u) /* ~100 ms per transfer, bounded */
 
-/* EasyDMA needs RAM buffers. TX carries the command+address; the flash's reply
- * lands in RX after those same bytes, so the payload is rxbuf[cmdlen..]. Static,
- * not on the stack - one holds a whole 4 KiB chunk plus the 4-byte command. */
+/* Dump records need not fit in one SPI transaction. Keep the DMA scratch buffer
+ * independent of their 4 KiB size; nor_read() splits larger requests. */
+#define G4B_NOR_READ_CHUNK 1024u
 static uint8_t nor_txbuf[4];
-static uint8_t nor_rxbuf[4 + G4B_S5_CHUNK];
+static uint8_t nor_rxbuf[4 + G4B_NOR_READ_CHUNK];
 
 #if IS_ENABLED(CONFIG_APEX_G4B_SPINOR_DUMP)
 static struct g4b_dump_chunk nor_chunk;
@@ -112,6 +112,10 @@ static bool nor_xfer(uint32_t cmdlen, uint8_t *out, uint32_t outlen)
     uint32_t start;
     bool ok = true;
 
+    if (cmdlen > sizeof(nor_txbuf) || outlen > sizeof(nor_rxbuf) - cmdlen) {
+        return false;
+    }
+
     g4b_pin_clr(G4B_PORT0, (enum g4b_pin)G4B_NOR_CS); /* select */
     __DSB();
 
@@ -144,14 +148,9 @@ static bool nor_xfer(uint32_t cmdlen, uint8_t *out, uint32_t outlen)
 
 static bool nor_read(uint32_t addr, uint8_t *out, uint32_t len)
 {
-    /* nor_xfer DMAs cmdlen+outlen bytes into nor_rxbuf[4 + G4B_S5_CHUNK], so one
-     * transfer's payload must not exceed G4B_S5_CHUNK. Chunk larger reads: a
-     * flash_read of a >4 KiB buffer through the LittleFS/flash API can request
-     * more than the buffer holds, which would otherwise run EasyDMA past it. The
-     * SPI-NOR READ (0x03) is restarted at the new address each chunk, so the
-     * bytes returned are identical to one long read. */
+    /* Restart READ at the next address without changing the caller's length. */
     while (len > 0u) {
-        uint32_t n = (len < G4B_S5_CHUNK) ? len : G4B_S5_CHUNK;
+        uint32_t n = (len < G4B_NOR_READ_CHUNK) ? len : G4B_NOR_READ_CHUNK;
 
         nor_txbuf[0] = G4B_NOR_CMD_READ;
         nor_txbuf[1] = (uint8_t)(addr >> 16);

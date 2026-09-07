@@ -330,8 +330,8 @@ config APEX_G4B_GAMEPAD
 	  The controller is available through standard USB HID APIs such as
 	  DirectInput and Raw Input. Game support varies: controls may need to be
 	  mapped in each game, and some games require a compatibility layer or a
-	  mod. XInput-only games do not see it directly. The gamepad is USB-only;
-	  ZMK's Bluetooth HID map does not include it.
+	  mod. XInput-only games do not see it directly. Radio builds can forward
+	  these reports through the dongle; Bluetooth does not include them.
 
 	  Selects the analog probe, since the axis is fed by the same 0xA2 samples.
 

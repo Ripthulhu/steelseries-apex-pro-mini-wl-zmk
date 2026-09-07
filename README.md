@@ -159,6 +159,7 @@ per-device calibration data are not committed.
 - [Building from source](docs/BUILDING.md)
 - [Configuration](docs/CONFIGURATION.md)
 - [Hardware](docs/HARDWARE.md)
+- [Reverse engineering](docs/reverse-engineering/README.md)
 - [Firmware internals](docs/FIRMWARE.md)
 - [Features and power use](docs/FEATURES.md)
 - [Keymap](docs/KEYMAP.md)

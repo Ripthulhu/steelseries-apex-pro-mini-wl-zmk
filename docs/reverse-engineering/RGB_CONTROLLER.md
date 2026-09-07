@@ -1,7 +1,7 @@
 # The RGB controller (IS31FL3743B)
 
 The per-key RGB is an **IS31FL3743B** constant-current matrix driver: 18 current
-sinks × 11 switch lines, driving 66 keys × 3 channels. It hangs off **SPIM2** and
+sinks × 11 switch lines, addressing 66 RGB positions on a 61-key board. It hangs off **SPIM2** and
 is written as a direct-register device — the open firmware does not use a Zephyr
 `led_strip` driver for it.
 
@@ -12,7 +12,7 @@ is written as a direct-register device — the open firmware does not use a Zeph
 | SCK | P1.09 | SPIM2 clock, 4 Mbit/s |
 | MOSI (SDI) | P1.08 | data to the controller |
 | MISO (SDO) | P0.08 | the Nordic's SPIM2 MISO line — see *Read-back* below |
-| CS | P0.11 | bit-banged in software; the controller's hardware CSN is not used |
+| CS | P0.11 | Driven by software rather than the Nordic SPIM CSN output |
 | Driver rail | P0.19 | raised last, lowered first |
 | Array rail | P0.23 | raised first, lowered last |
 

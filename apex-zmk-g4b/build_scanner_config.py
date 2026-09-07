@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
-"""Construct the STM32 boot-configuration prefix from UNDERSTOOD, named parameters
-and prove it reproduces the captured stock sequence byte-for-byte.
+"""Reconstruct the STM32 startup frames and compare them with the stock capture.
 
-This is the "no blind replay" guarantee: instead of trusting an opaque capture,
-every one of the 59 frames is rebuilt here from a decoded model of what it does
-(see repo/docs/PROTOCOL.md "Boot replay handshake"), and checked against the
-frozen capture in apex_boot_prefix.h. Run with --check in CI/verification.
+Parameters supply the actuation and control fields. Neighbour records come
+from apex_boot_prefix.h. A byte match checks reconstruction, not the meaning
+of every field. See docs/PROTOCOL.md and run with --check to verify.
 
 Frame model (all values are the stock defaults; the firmware injects live
 actuation / rapid-trigger over 0x30/0x33/0x35 at boot):
@@ -15,7 +13,7 @@ actuation / rapid-trigger over 0x30/0x33/0x35 at boot):
   0x33  per-key secondary pair      - same layout as 0x30
   0x34  key mask                    - sent empty (count 0)
   0x35  rapid-trigger per key       - {key_id, sensitivity} pairs, stock defaults
-  0x36  per-key crosstalk topology  - 9-byte neighbour record per key (SCAN_TOPOLOGY)
+  0x36  logical neighbour graph    - 9-byte neighbour record per key
   0x37  per-key uniform default     - {idx, 0x14, 0x00} per key
   0x38  scan debounce/timeout       - 32-bit LE scalar = 500
   0x20  scanner enable / mode       - control (01 01)
@@ -47,9 +45,7 @@ def parse_capture():
 
 
 def extract_topology(frames):
-    """The 0x36 topology (9 bytes/key) - decoded as each key's crosstalk-neighbour
-    list. Sourced from the capture (empirical PCB coupling), but every byte is now
-    a named per-key record, not an unlabelled blob."""
+    """Read the nine-byte logical neighbour records retained in the capture."""
     topo = {}
     for _, tx, _ in frames:
         if tx[0] != 0x36:
@@ -98,7 +94,7 @@ def build_frame(tx_template, topo):
         for i in range(2, FRAME):
             out[i] = tx_template[i]
         return out
-    if op == 0x36:                                   # per-key crosstalk topology
+    if op == 0x36:                                   # logical neighbour records
         count = tx_template[1]
         out[1] = count
         for k in range(count):
@@ -138,7 +134,7 @@ def main():
     if mism:
         print("FAIL: construction does not reproduce the capture")
         return 1
-    print("PASS: the firmware config is fully constructed from understood parameters")
+    print("PASS: reconstructed transmit frames match the stock capture")
     return 0
 
 

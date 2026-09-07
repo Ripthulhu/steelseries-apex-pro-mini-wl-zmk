@@ -40,6 +40,9 @@
 #endif
 #if IS_ENABLED(CONFIG_APEX_G4B_GAMEPAD)
 #include "gamepad_g4b.h"
+#if IS_ENABLED(CONFIG_APEX_G4B_RADIO_INPUT)
+#include "apex_radio_input.h"
+#endif
 #endif
 #if IS_ENABLED(CONFIG_APEX_G4B_SPINOR_DUMP) || \
     IS_ENABLED(CONFIG_APEX_G4B_SPINOR_WRITETEST)
@@ -104,7 +107,7 @@ static const uint8_t s1_opcodes[G4B_S1_EXCHANGES] = { 0x90u, 0xA0u };
 #endif
 
 #if CONFIG_APEX_G4B_STAGE == 2 || CONFIG_APEX_G4B_STAGE == 3
-#include "apex_boot_prefix.h"
+#include "apex_boot_compact.h"
 
 BUILD_ASSERT(APEX_BOOT_PREFIX_FRAMES == G4B_S2_PREFIX_FRAMES,
              "the frozen prefix and the record layout disagree on frame count");
@@ -215,6 +218,19 @@ static bool s3_usb_is_powered(void)
 #endif
 }
 #endif
+
+static bool s3_gamepad_streaming(void)
+{
+#if IS_ENABLED(CONFIG_APEX_G4B_GAMEPAD)
+    if (!g4b_gamepad_is_enabled()) return false;
+#if IS_ENABLED(CONFIG_APEX_G4B_RADIO_INPUT)
+    if (apex_radio_input_selected()) return apex_radio_input_connected();
+#endif
+    return s3_usb_is_powered();
+#else
+    return false;
+#endif
+}
 
 static void settle(void)
 {
@@ -2141,7 +2157,7 @@ static void s3_sleep_maybe(void)
 {
     bool powered = false;
 
-    if (s3_sleep_failed) {
+    if (s3_sleep_failed || s3_gamepad_streaming()) {
         return;
     }
 
@@ -2444,7 +2460,7 @@ static bool s3_mode3_wanted(void)
 #if IS_ENABLED(CONFIG_ZMK_USB)
     powered = s3_usb_is_powered();
 #endif
-    return !powered && g4b_mode_is_wireless() &&
+    return !powered && !s3_gamepad_streaming() && g4b_mode_is_wireless() &&
            s3_cfg_dirty == 0u && !s3_mode3_keys_down &&
            (now - s3_last_activity_ms) >=
                (uint32_t)CONFIG_APEX_G4B_IDLE_AFTER_MS &&
@@ -2908,13 +2924,7 @@ static void s3_gamepad_update(void);
 static bool s3_analog_sample_wanted(void)
 {
 #if IS_ENABLED(CONFIG_APEX_G4B_GAMEPAD)
-    /* The analog gamepad has no BLE report map. Do not spend a 0xA2 exchange
-     * every 4 ms unless its USB interface is both usable and explicitly
-     * enabled. A standalone ANALOG_PROBE diagnostic build keeps its original
-     * unconditional sampling below because collecting those measurements is
-     * the entire purpose of that build.
-     */
-    return s3_usb_is_powered() && g4b_gamepad_is_enabled();
+    return s3_gamepad_streaming();
 #else
     return true;
 #endif
@@ -3918,7 +3928,7 @@ static void s3_run_keyboard(void)
              * edge comes (the A0 keep-alive + idle work still run per pass). */
             uint32_t wait_ms = 1u;
 
-            if (idle && g4b_mode_is_wireless() && !s3_usb_is_powered()) {
+            if (idle && !s3_gamepad_streaming() && g4b_mode_is_wireless() && !s3_usb_is_powered()) {
                 /* Keep visible custom effects and fades at their actual render
                  * limit, rather than waking at 1 kHz for a 200 Hz renderer.
                  * With the LEDs blanked (or in ZMK passthrough), use the full

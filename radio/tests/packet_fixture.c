@@ -1,5 +1,9 @@
 /* SPDX-License-Identifier: MIT */
 #include "apex_packet.h"
+#include "apex_gamepad.h"
+void fixture_gamepad_neutral(uint8_t *report) { apex_gamepad_neutral(report); }
+int fixture_gamepad_valid(const uint8_t *payload, size_t length) { return apex_gamepad_valid(payload, length); }
+int fixture_gamepad_newer(uint32_t counter, uint32_t *last) { return apex_gamepad_newer(counter, last); }
 #include "apex_connection.h"
 #include "apex_hop.h"
 #include "apex_hop_link.h"

@@ -432,17 +432,16 @@ static int cmd_gamepad(const struct shell *sh, size_t argc, char **argv)
     if (argc >= 2 && !strcmp(argv[1], "on")) {
         g4b_gamepad_set_enabled(true);
         g4b_settings_mark_dirty();
-        shell_print(sh, "gamepad ON (persisted). Adds a USB HID game controller "
-                    "and re-enumerates - USB only. Check joy.cpl.");
+        shell_print(sh, "gamepad ON (saved). USB or dongle output; no Bluetooth gamepad.");
     } else if (argc >= 2 && !strcmp(argv[1], "off")) {
         g4b_gamepad_set_enabled(false);
         g4b_settings_mark_dirty();
         shell_print(sh, "gamepad OFF (persisted).");
     } else {
         shell_print(sh, "gamepad: %s", g4b_gamepad_is_enabled() ? "ON" : "off");
-        shell_print(sh, "  reports sent=%u busy=%u err=%u",
+        shell_print(sh, "  direct USB reports sent=%u busy=%u err=%u",
                     g4b_gp_writes, g4b_gp_busy, g4b_gp_err);
-        shell_print(sh, "USB-only (not exposed over Bluetooth). Fn+Z also toggles it.");
+        shell_print(sh, "USB or dongle output; not Bluetooth. Fn+Z toggles it.");
     }
     return 0;
 }
@@ -1258,9 +1257,9 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
 #endif
 #if IS_ENABLED(CONFIG_APEX_G4B_GAMEPAD)
     SHELL_CMD(gamepad, NULL,
-              "USB analog gamepad (W/A/S/D depth as joystick axes).\n"
+              "Analog gamepad (W/A/S/D depth as joystick axes).\n"
               "Usage: apex gamepad [on|off]   (Fn+Z toggles it too)\n"
-              "USB-only; adds a HID game controller and re-enumerates. No args "
+              "USB or dongle; adds a HID controller and re-enumerates. No args "
               "shows state and report counters.",
               cmd_gamepad),
 #endif

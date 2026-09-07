@@ -21,6 +21,10 @@
 #include <zephyr/drivers/usb/udc_buf.h>
 
 #include "gamepad_g4b.h"
+#include "apex_gamepad.h"
+#if IS_ENABLED(CONFIG_APEX_G4B_RADIO_INPUT)
+#include "apex_radio_input.h"
+#endif
 
 /* One application collection on its own interface, so no report ID is needed.
  * Five 16-bit unsigned axes then eight buttons: 5*2 + 1 = 11 bytes.
@@ -38,34 +42,9 @@
  * own range either way, and unsigned avoids sign-extension mistakes in
  * third-party mapping tools.
  */
-static const uint8_t g4b_gamepad_desc[] = {
-    0x05, 0x01,             /* Usage Page (Generic Desktop)   */
-    0x09, 0x05,             /* Usage (Game Pad)               */
-    0xA1, 0x01,             /* Collection (Application)       */
-    0xA1, 0x00,             /*   Collection (Physical)        */
-    0x09, 0x30,             /*     Usage (X)                  */
-    0x09, 0x31,             /*     Usage (Y)                  */
-    0x09, 0x32,             /*     Usage (Z)                  */
-    0x09, 0x35,             /*     Usage (Rz)                 */
-    0x09, 0x33,             /*     Usage (Rx)                 */
-    0x15, 0x00,             /*     Logical Minimum (0)        */
-    0x26, 0xFF, 0x7F,       /*     Logical Maximum (32767)    */
-    0x75, 0x10,             /*     Report Size (16)           */
-    0x95, 0x05,             /*     Report Count (5)           */
-    0x81, 0x02,             /*     Input (Data,Var,Abs)       */
-    0xC0,                   /*   End Collection               */
-    0x05, 0x09,             /*   Usage Page (Button)          */
-    0x19, 0x01,             /*   Usage Minimum (1)            */
-    0x29, 0x08,             /*   Usage Maximum (8)            */
-    0x15, 0x00,             /*   Logical Minimum (0)          */
-    0x25, 0x01,             /*   Logical Maximum (1)          */
-    0x75, 0x01,             /*   Report Size (1)              */
-    0x95, 0x08,             /*   Report Count (8)             */
-    0x81, 0x02,             /*   Input (Data,Var,Abs)         */
-    0xC0,                   /* End Collection                 */
-};
+static const uint8_t g4b_gamepad_desc[] = { APEX_GAMEPAD_DESCRIPTOR };
 
-#define G4B_GP_REPORT_BYTES 11u
+#define G4B_GP_REPORT_BYTES APEX_GAMEPAD_REPORT_SIZE
 
 static const struct device *gp_dev;
 static K_SEM_DEFINE(gp_sem, 1, 1);
@@ -177,15 +156,24 @@ static bool gp_enabled;
 
 bool g4b_gamepad_is_enabled(void)
 {
-    return gp_enabled;
+    k_spinlock_key_t key = k_spin_lock(&gp_lock);
+    bool enabled = gp_enabled;
+    k_spin_unlock(&gp_lock, key);
+    return enabled;
 }
 
 void g4b_gamepad_set_enabled(bool on)
 {
+    k_spinlock_key_t key = k_spin_lock(&gp_lock);
     if (on == gp_enabled) {
+        k_spin_unlock(&gp_lock, key);
         return;
     }
     gp_enabled = on;
+#if IS_ENABLED(CONFIG_APEX_G4B_RADIO_INPUT)
+    apex_radio_gamepad_publish(on, NULL);
+#endif
+    k_spin_unlock(&gp_lock, key);
     if (on) {
         /* A report that was mid-submit when the interface was last torn down can
          * leave gp_sem taken - its completion callback never fires for a transfer
@@ -206,10 +194,11 @@ void g4b_gamepad_publish(uint16_t x, uint16_t y, uint16_t z, uint16_t rz,
 {
     k_spinlock_key_t key;
 
+    key = k_spin_lock(&gp_lock);
     if (!gp_enabled) {
+        k_spin_unlock(&gp_lock, key);
         return;
     }
-    key = k_spin_lock(&gp_lock);
 
     gp_published[0] = (uint8_t)(x & 0xFFu);
     gp_published[1] = (uint8_t)(x >> 8);
@@ -222,7 +211,13 @@ void g4b_gamepad_publish(uint16_t x, uint16_t y, uint16_t z, uint16_t rz,
     gp_published[8] = (uint8_t)(rx & 0xFFu);
     gp_published[9] = (uint8_t)(rx >> 8);
     gp_published[10] = buttons;
+#if IS_ENABLED(CONFIG_APEX_G4B_RADIO_INPUT)
+    apex_radio_gamepad_publish(true, gp_published);
+#endif
     k_spin_unlock(&gp_lock, key);
+#if IS_ENABLED(CONFIG_APEX_G4B_RADIO_INPUT)
+    if (apex_radio_input_selected()) return;
+#endif
 
     /* Submitting an already-pending work item is a no-op - a free rate limit:
      * however fast the caller publishes, at most one report is queued at a time.
@@ -247,10 +242,7 @@ static int g4b_gamepad_init(void)
      * switched on is neutral, not hard-left. Written directly because publish()
      * is gated on gp_enabled, which is false here by design.
      */
-    gp_published[0] = (uint8_t)(G4B_GP_CENTRE & 0xFFu);
-    gp_published[1] = (uint8_t)(G4B_GP_CENTRE >> 8);
-    gp_published[2] = gp_published[0];
-    gp_published[3] = gp_published[1];
+    apex_gamepad_neutral(gp_published);
     return 0;
 }
 

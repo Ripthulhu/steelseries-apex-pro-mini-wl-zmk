@@ -6,8 +6,22 @@ Wireless. It receives keyboard and media reports from ZMK over an encrypted
 It does not use the SteelSeries protocol or pair through GG.
 
 This is development firmware. Both devices need matching radio builds; the
-normal keyboard release UF2 does not include this protocol. Gamepad
-output, Studio and wireless updates are not implemented on the receiver.
+normal keyboard release UF2 does not include this protocol. Studio and wireless
+updates are not implemented on the receiver.
+
+## Analog controller
+
+Press `Fn`+`Z` to turn the controller on or off. W/A/S/D provide the same axes
+as [the keyboard's USB gamepad](../docs/FEATURES.md#analog-gamepad). The receiver
+briefly reconnects its USB interfaces when the controller is added or removed.
+Keyboard and media keys continue to use their usual interface.
+
+A data connection to the keyboard's own USB port takes priority. Unplugging it
+returns controller output to the dongle. A battery bank does not take priority.
+Bluetooth does not support controller output.
+
+This is a generic HID controller, not an Xbox controller. Games may need input
+mapping or mods, and some will not work well with mixed keyboard/controller input.
 
 ## Before flashing
 

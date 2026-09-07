@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: MIT */
 #include "apex_radio_input.h"
 #include "apex_latency.h"
+#include "gamepad.h"
 #include <string.h>
 #include <zephyr/kernel.h>
 #include <zephyr/usb/class/usbd_hid.h>
@@ -76,6 +77,7 @@ void apex_radio_release(void)
     memset(keyboard, 0, sizeof(keyboard));
     memset(consumer, 0, sizeof(consumer));
     k_spin_unlock(&lock, key);
+    receiver_gamepad_release();
     k_sem_give(&hid_event);
 }
 
@@ -242,11 +244,13 @@ void receiver_hid_poll(void)
     k_spin_unlock(&lock, key);
     if (type) (void)submit(0, type, zero, current_generation);
     else if (queued) (void)submit(frame.sequence, frame.type, frame.data, current_generation);
+    receiver_gamepad_poll();
 }
 
 int receiver_hid_init(void)
 {
-    return hid_device_register(hid, descriptor, sizeof(descriptor), &ops);
+    int rc = hid_device_register(hid, descriptor, sizeof(descriptor), &ops);
+    return rc ? rc : receiver_gamepad_init();
 }
 
 int receiver_hid_benchmark(const struct shell *sh, size_t argc, char **argv)
@@ -291,6 +295,7 @@ done:
 
 int receiver_hid_status(const struct shell *sh, size_t argc, char **argv)
 {
+    receiver_gamepad_status(sh);
     ARG_UNUSED(argc); ARG_UNUSED(argv);
     k_spinlock_key_t key = k_spin_lock(&lock);
     bool r = ready, b = busy;

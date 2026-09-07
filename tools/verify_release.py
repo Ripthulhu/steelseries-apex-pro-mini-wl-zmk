@@ -127,6 +127,13 @@ def check_boot_prefix() -> None:
     if result.returncode != 0:
         fail(f"scanner config no longer constructs from named parameters:\n{result.stdout}{result.stderr}")
     print("boot_prefix_constructed=PASS (59 frames rebuilt from named parameters)")
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "apex-zmk-g4b" / "test_compact_boot_prefix.py")],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        fail(f"compact scanner table tests failed:\n{result.stdout}{result.stderr}")
+    print("boot_prefix_compact=PASS")
 
 
 def check_bootloader_recovery_files() -> None:

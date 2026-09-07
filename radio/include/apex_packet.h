@@ -20,6 +20,7 @@ enum apex_packet_type {
     APEX_PACKET_KEEPALIVE = 4,
     APEX_PACKET_CHANNEL_MAP = 5,
     APEX_PACKET_INPUT_BATCH = 6,
+    APEX_PACKET_GAMEPAD = 7,
 };
 enum apex_packet_result {
     APEX_PACKET_OK = 0,

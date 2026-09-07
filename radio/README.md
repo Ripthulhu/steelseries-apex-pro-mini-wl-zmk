@@ -5,6 +5,30 @@ Build and pairing instructions are in [the receiver README](../dongle/README.md)
 The input test builds now use four-channel hopping. This remains development
 firmware; the 1 kHz input scheduler and wireless power measurements are unfinished.
 
+## Analog reports
+
+Packet type 7 carries the gamepad state: format byte `1`, enabled byte `0` or
+`1`, then the 11-byte USB report. The shared descriptor declares X, Y, Z, Rz
+and Rx as unsigned 16-bit axes (0..32767), followed by eight button bits.
+Both devices need the gamepad-capable build; pairing records are unchanged.
+
+These packets replace idle keepalives at the existing 5 ms retry cadence.
+Keyboard and media transitions take priority. The sender keeps only the newest
+axis sample; the receiver rejects older authenticated packet counters even
+within the CCM replay window. Sequence tracking resets with each fresh session.
+
+After 100 ms without a new controller packet the receiver centres X/Y/Rx and
+releases Z/Rz and buttons. Link loss also clears the controller, but leaves its
+USB interface present. Explicitly disabling it removes the interface. The
+keyboard sends neutral axes if its scanner samples become older than 100 ms.
+These timeouts do not depend on the keyboard/media queue draining.
+
+The shared ARM tests cover packet authentication, replay rejection, axis ranges,
+neutral positions and counter ordering. On Windows, typing, gradual W/A/S/D
+movement and enabling/disabling the controller through the dongle were confirmed
+on 7 September 2026. Physical disconnects while holding an axis and latency under
+mixed keyboard/controller traffic still need testing.
+
 ## Input delivery changes
 
 Input format 2 separates reception from USB completion. Both devices need this
@@ -281,8 +305,9 @@ or interference tests. They fall well short of the 1000 reports/s target.
 
 The older single-report timing counters below were collected before input
 format 2. `SEND_ACK` tracks only one report and cannot represent all reports
-with delivery pipelined. `COMPLETE_ACK` and `ACK completion_tx` no longer advance
-because unsolicited completion replies were removed. Use `QUEUE_ACK` and USB
+with delivery pipelined. `COMPLETE_ACK` was removed because unsolicited
+completion replies no longer exist. `ACK completion_tx` is a legacy field that
+doesn't advance. Use `QUEUE_ACK` and USB
 completion counts for the current pipeline until per-report timing is updated.
 
 `SEND_ACK` measures from entering the first successful input send call to
@@ -292,11 +317,10 @@ and ACK handling. Failed or deferred send attempts do not start the measurement.
 input send call, only when another report was already queued at ACK time.
 Session changes discard unfinished measurements.
 
-`COMPLETE_ACK` measures from USB completion to the end of the receiver's
-immediate completion ACK transmission. ACKs recovered through later input
-retries are not included. The three counters are separate intervals with
-different sample counts. Subtract counts and totals between snapshots before
-calculating averages. Neither endpoint timestamp measures host application use.
+Older captures contain `COMPLETE_ACK`, which measured the old immediate reply
+path. It was always zero after that path was removed. Don't compare it with
+current USB completion counters. Subtract counts and totals between snapshots
+before calculating averages; these aren't host application timestamps.
 
 `INPUT_ENCODE` times input preparation at the send site: either copying a
 prepared packet or encoding one there, including retries and packets later

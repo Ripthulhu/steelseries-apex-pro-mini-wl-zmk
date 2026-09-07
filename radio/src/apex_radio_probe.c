@@ -212,7 +212,7 @@ static struct apex_input_queue input_queue;
 static struct k_spinlock input_lock;
 static uint32_t queued_at[APEX_INPUT_QUEUE_SIZE];
 static struct apex_latency queue_latency;
-static struct apex_latency send_ack_latency, ack_next_latency, completion_ack_latency;
+static struct apex_latency send_ack_latency, ack_next_latency;
 static struct apex_latency input_encode_latency, data_decode_latency, ack_encode_latency;
 static uint32_t timed_sequence, first_send_at, last_ack_at;
 static bool next_after_ack;
@@ -239,6 +239,26 @@ static void input_trace_acked(uint32_t sequence, bool more)
     next_after_ack = more;
 }
 static atomic_t input_selected, resync, queue_overflows, input_acked, reply_pending;
+static uint8_t gamepad_report[APEX_GAMEPAD_REPORT_SIZE];
+static bool gamepad_enabled;
+static bool gamepad_fresh;
+static uint32_t gamepad_sample_at;
+static uint32_t gamepad_rx_counter;
+
+bool apex_radio_input_selected(void) { return atomic_get(&input_selected) != 0; }
+
+void apex_radio_gamepad_publish(bool enabled, const uint8_t *report)
+{
+    k_spinlock_key_t key = k_spin_lock(&input_lock);
+    gamepad_enabled = enabled;
+    gamepad_fresh = report != NULL;
+    gamepad_sample_at = k_uptime_get_32();
+    if (report) memcpy(gamepad_report, report, sizeof(gamepad_report));
+    else apex_gamepad_neutral(gamepad_report);
+    k_spin_unlock(&input_lock, key);
+}
+
+__weak void apex_radio_gamepad_receive(bool enabled, const uint8_t *report) {}
 static atomic_t input_progress, queue_high_water;
 static atomic_t clock_input_advances;
 static atomic_t rx_sequence, input_delivered, duplicate_reports, usb_waits;
@@ -571,7 +591,7 @@ int apex_radio_benchmark(const struct shell *sh, size_t argc, char **argv)
 }
 #endif
 
-static int input_packet(uint8_t type, const uint8_t *data, size_t length)
+static int input_packet(uint8_t type, const uint8_t *data, size_t length, uint32_t counter)
 {
     BUILD_ASSERT(APEX_DELIVERY_BATCH_SIZE <= APEX_PACKET_PAYLOAD_MAX);
     uint32_t ack = 0;
@@ -600,6 +620,14 @@ static int input_packet(uint8_t type, const uint8_t *data, size_t length)
         k_spin_unlock(&input_lock, key);
         apex_radio_update_leds(status.leds);
         return 0;
+    }
+    if (type == APEX_PACKET_GAMEPAD) {
+        if (!apex_gamepad_valid(data, length)) return -EINVAL;
+        /* The CCM replay window permits reordering; absolute axes must not. */
+        if (apex_gamepad_newer(counter, &gamepad_rx_counter)) {
+            apex_radio_gamepad_receive(data[1] != 0, data + 2);
+        }
+        return input_ack(atomic_get(&rx_sequence));
     }
     if (type == APEX_PACKET_INPUT_BATCH) {
         struct apex_input_frame frames[APEX_DELIVERY_BATCH_MAX];
@@ -696,7 +724,7 @@ static int radio_start_immediate(uint8_t type)
     unsigned int key = irq_lock();
 #if HOP_ENABLED
     if (type == APEX_PACKET_INPUT || type == APEX_PACKET_INPUT_BATCH ||
-        type == APEX_PACKET_ACK || type == APEX_PACKET_KEEPALIVE) {
+        type == APEX_PACKET_ACK || type == APEX_PACKET_KEEPALIVE || type == APEX_PACKET_GAMEPAD) {
         uint64_t now = radio_time_us();
         bool window = type == APEX_PACKET_ACK ? apex_hop_link_reply_window(&hop_link, now) :
                                               apex_hop_link_input_window(&hop_link, now);
@@ -901,10 +929,12 @@ static int new_session(void)
 #if INPUT_ENABLED
     k_spinlock_key_t key = k_spin_lock(&input_lock);
     apex_input_disconnect(&input_queue);
+    gamepad_fresh = false;
     timed_sequence = 0;
     next_after_ack = false;
     k_spin_unlock(&input_lock, key);
     atomic_set(&rx_sequence, 0);
+    gamepad_rx_counter = 0;
     apex_delivery_tx_reset(&delivery_tx);
     input_prepare_clear();
     ack_prepare_clear();
@@ -1041,7 +1071,7 @@ static void probe_thread(void *a, void *b, void *c)
                         if (!apex_hop_link_ready(&hop_link, received_us)) n = -EINVAL;
                         else
 #endif
-                        n = input_packet(type, plain, n);
+                        n = input_packet(type, plain, n, sys_get_le32(rx + 4));
 #else
                         uint8_t check[APEX_PACKET_PAYLOAD_MAX], check_type;
                         if (apex_connection_decode(&connection, rx, length, &check_type,
@@ -1229,12 +1259,22 @@ static void probe_thread(void *a, void *b, void *c)
                 uint8_t payload[APEX_DELIVERY_BATCH_SIZE];
                 int length = count > 1 ? apex_delivery_batch_pack(frames, count, payload, sizeof(payload)) :
                              queued ? apex_input_pack(frames, payload, sizeof(payload)) : 1;
-                if (!queued) payload[0] = APEX_INPUT_VERSION;
+                if (!queued) {
+                    payload[0] = APEX_GAMEPAD_VERSION;
+                    key = k_spin_lock(&input_lock);
+                    payload[1] = gamepad_enabled && atomic_get(&input_selected);
+                    if (payload[1] && gamepad_fresh &&
+                        k_uptime_get_32() - gamepad_sample_at < 100)
+                        memcpy(payload + 2, gamepad_report, sizeof(gamepad_report));
+                    else apex_gamepad_neutral(payload + 2);
+                    k_spin_unlock(&input_lock, key);
+                    length = APEX_GAMEPAD_PAYLOAD_SIZE;
+                }
                 if (length < 0) { atomic_or(&resync, RESET_QUEUE); goto wait_next; }
                 uint32_t encode_started = k_cycle_get_32();
                 n = count == 1 ? input_prepare_take(frames[0].sequence, tx) : 0;
                 if (!n) n = apex_connection_encode(&connection,
-                    count > 1 ? APEX_PACKET_INPUT_BATCH : queued ? APEX_PACKET_INPUT : APEX_PACKET_KEEPALIVE,
+                    count > 1 ? APEX_PACKET_INPUT_BATCH : queued ? APEX_PACKET_INPUT : APEX_PACKET_GAMEPAD,
                     payload, length, tx, sizeof(tx));
                 if (queued) {
                     key = k_spin_lock(&input_lock);
@@ -1403,7 +1443,6 @@ int apex_radio_probe_status(const struct shell *sh, size_t argc, char **argv)
     k_spinlock_key_t latency_key = k_spin_lock(&input_lock);
     struct apex_latency latency = queue_latency;
     struct apex_latency send_ack = send_ack_latency, ack_next = ack_next_latency;
-    struct apex_latency completion_ack = completion_ack_latency;
     struct apex_latency input_encode = input_encode_latency, data_decode = data_decode_latency;
     struct apex_latency ack_encode = ack_encode_latency;
     k_spin_unlock(&input_lock, latency_key);
@@ -1413,9 +1452,6 @@ int apex_radio_probe_status(const struct shell *sh, size_t argc, char **argv)
     shell_print(sh, "ACK_NEXT count=%u min_us=%u max_us=%u total_us=%llu",
                 ack_next.count, ack_next.min_us, ack_next.max_us,
                 (unsigned long long)ack_next.total_us);
-    shell_print(sh, "COMPLETE_ACK count=%u min_us=%u max_us=%u total_us=%llu",
-                completion_ack.count, completion_ack.min_us, completion_ack.max_us,
-                (unsigned long long)completion_ack.total_us);
     shell_print(sh, "INPUT_ENCODE count=%u min_us=%u max_us=%u total_us=%llu",
                 input_encode.count, input_encode.min_us, input_encode.max_us,
                 (unsigned long long)input_encode.total_us);

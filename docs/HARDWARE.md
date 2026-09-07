@@ -5,6 +5,9 @@ the port. Later revisions may differ. It uses a Nordic controller for the
 keyboard and radio, plus a separate STM32 controller for the Hall-effect
 switches. This project replaces only the Nordic firmware.
 
+For how these connections were identified, see
+[the reverse-engineering account](reverse-engineering/README.md).
+
 ## Board overview
 
 ```text
@@ -132,7 +135,7 @@ is unrelated to Nordic installation or recovery.
 | TWI1/I²C | P0.16 SCL, P0.17 SDA | BQ25895 at `0x6A` | 400 kHz in stock firmware; current driver uses 100 kHz |
 | SAADC | P0.03 / AIN1 | Mode-switch divider | Approximately 0 V, 1.6 V, and 3.3 V for the three positions |
 | USB | D+ and D− through U10 | USB host | U10 must be enabled through P0.25 before enumeration |
-| Radio | Internal nRF52833 peripheral | Bluetooth; experimental 2.4 GHz work | Bluetooth is supported; the SteelSeries dongle protocol is incomplete |
+| Radio | Internal nRF52833 peripheral | Bluetooth or the custom 2.4 GHz receiver | Custom radio builds carry keyboard/media input; stock dongle compatibility isn't implemented |
 
 SPIM0 and the low-frequency crystal function share P0.00/P0.01. The board uses
 the nRF internal RC source for LFCLK so those pins remain available to the NOR.

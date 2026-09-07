@@ -13,7 +13,7 @@ normally sits is a second Fn key; this firmware does not assign Caps Lock.
   steps the effect, `Fn`+`Y` / `Fn`+`U` shift the hue, and `Fn`+`C` / `Fn`+`V`
   change brightness.
 - `Fn`+`Z` toggles the optional
-  [USB analog gamepad](FEATURES.md#analog-gamepad); `Fn`+`Right Ctrl`+`S`
+  [analog gamepad](FEATURES.md#analog-gamepad); `Fn`+`Right Ctrl`+`S`
   toggles Studio over USB. The two share one USB endpoint, so enabling either
   drops the other; Studio over Bluetooth is always available.
 - `Fn`+`F`…`K` select Bluetooth profiles 0–4, `Fn`+`\` clears the current one.
@@ -38,7 +38,7 @@ when off**; toggling one also flashes it **green twice** when it turns on or
 
 | Key | Mode |
 |---|---|
-| `Z` | USB analog gamepad |
+| `Z` | Analog gamepad |
 | `S` | Studio over USB |
 | `T` | Rapid trigger |
 | `E` | Lighting on/off |

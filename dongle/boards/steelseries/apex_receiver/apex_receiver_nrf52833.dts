@@ -11,6 +11,11 @@
         in-report-size = <16>;
         in-polling-period-us = <1000>;
     };
+    receiver_gamepad: receiver_gamepad {
+        compatible = "zephyr,hid-device";
+        in-report-size = <11>;
+        in-polling-period-us = <1000>;
+    };
     chosen {
         zephyr,sram = &sram0;
         zephyr,flash = &flash0;
