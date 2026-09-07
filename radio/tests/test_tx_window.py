@@ -23,6 +23,7 @@ def main():
 #include <assert.h>
 #include <errno.h>
 #define ARG_UNUSED(x) (void)(x)
+#define APEX_RECEIVER 1
 static struct { unsigned int TASKS_TXEN, FREQUENCY; } radio;
 #define NRF_RADIO (&radio)
 static int locked, tx_window_deferrals;
@@ -31,6 +32,7 @@ static void irq_unlock(unsigned int key) { assert(locked && key == 7); locked = 
 #define atomic_inc(p) (++*(p))
 #if HOP_ENABLED
 static int window, reply_window, channel, hop_link;
+static int local_role; /* APEX_KEYBOARD; only read on the SHELL reply path */
 static uint64_t radio_time_us(void) { assert(locked); return 1234; }
 static int apex_hop_link_input_window(int *p, uint64_t now) {
     assert(locked && p == &hop_link && now == 1234); return window;

@@ -37,6 +37,10 @@ jobs:
         shell: bash
         run: |
           for test in radio/tests/test_*.py dongle/tests/test_*.py; do
-            case "$test" in *test_packet.py) continue;; esac
+            # Skip tests that need a built receiver ELF (unicorn/pyelftools); the
+            # radio.yml job runs those against the compiled apex-receiver.elf.
+            case "$test" in
+              *test_packet.py|*/test_gamepad.py|*/test_keyboard_shell.py|*/test_update.py) continue;;
+            esac
             python "$test"
           done
