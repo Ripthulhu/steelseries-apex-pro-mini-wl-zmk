@@ -8,6 +8,9 @@
 #if IS_ENABLED(CONFIG_APEX_G4B_WIRELESS_UPDATE)
 #include "update_g4b.h"
 #endif
+#if IS_ENABLED(CONFIG_ZMK_STUDIO)
+#include "studio_radio_g4b.h"
+#endif
 
 static shell_transport_handler_t event_handler;
 static void *event_context;
@@ -112,6 +115,16 @@ static int transport_read(const struct shell_transport *iface, void *data,
         (void)apex_shell_send(current, reply, sizeof(reply), k_uptime_get() + 2000);
         return 0;
     }
+#if IS_ENABLED(CONFIG_ZMK_STUDIO)
+    if (frame[0] == APEX_STUDIO_DATA) {
+        /* Opaque Studio RPC bytes: hand straight to the RPC subsystem, never
+         * through the shell command path. Keep the link in bulk cadence while a
+         * session is live. */
+        apex_shell_bulk_touch();
+        g4b_studio_radio_feed(frame + 1, n - 1);
+        return 0;
+    }
+#endif
     if (frame[0] != APEX_SHELL_COMMAND && frame[0] != APEX_SHELL_COMMAND_END) return 0;
     if ((size_t)n - 1 >= sizeof(command) - used) command_error = -E2BIG;
     for (int i = 1; i < n && !command_error; i++) {

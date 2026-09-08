@@ -60,6 +60,7 @@ if(CONFIG_APEX_RADIO_HOPPING)
 endif()
 if(CONFIG_APEX_RADIO_SHELL)
   zephyr_library_sources(src/shell_radio_g4b.c ../radio/src/apex_stream.c ../radio/src/apex_shell_link.c)
+  zephyr_library_sources_ifdef(CONFIG_ZMK_STUDIO src/studio_radio_g4b.c)
 endif()
 # The `apex` ZMK Studio RPC subsystem (heatmap etc.). Needs ZMK_STUDIO; gated
 # with the shell build for now since it shares the apex_control API. It includes

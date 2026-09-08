@@ -30,6 +30,10 @@ zephyr_udc0: &usbd {
         compatible = "zephyr,cdc-acm-uart";
         label = "Receiver console";
     };
+    studio_uart: studio_uart {
+        compatible = "zephyr,cdc-acm-uart";
+        label = "Receiver Studio";
+    };
 };
 
 &wdt0 { status = "okay"; };

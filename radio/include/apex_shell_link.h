@@ -9,6 +9,11 @@
 enum apex_shell_message {
     APEX_SHELL_COMMAND = 1, APEX_SHELL_COMMAND_END, APEX_SHELL_OUTPUT, APEX_SHELL_RESULT,
     APEX_UPDATE_DATA, APEX_UPDATE_REPLY,
+    /* Opaque ZMK Studio RPC bytes, forwarded transparently in both directions so
+     * the host can configure the keyboard through the dongle while wireless.
+     * DATA = host->keyboard, REPLY = keyboard->host. The RPC's own SOF/EOF
+     * framing delimits messages within this byte stream. */
+    APEX_STUDIO_DATA, APEX_STUDIO_REPLY,
 };
 
 uint32_t apex_shell_generation(void);
