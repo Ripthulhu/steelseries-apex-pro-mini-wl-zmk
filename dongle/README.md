@@ -172,17 +172,23 @@ these are included in the radio build commands above.
 
 ## Pair over USB
 
-Connect both devices by USB and close their serial terminals. Replace the two
-port placeholders with their shell ports:
+Connect both devices by USB, close any open serial terminals on them, and run:
 
 ```sh
-python tools/dongle.py pair --keyboard-port KEYBOARD_PORT --dongle-port RECEIVER_PORT
+python tools/dongle.py pair
 ```
+
+With one keyboard and one receiver attached it finds their shell ports on its
+own (the keyboard exposes more than one port, so it probes for the right one).
+Pass `--keyboard-port` and/or `--dongle-port` only to override the auto-detection,
+for example when several devices are connected.
 
 This installs a unique shared key without printing it or placing it in shell
 history. Use `--replace` to replace an existing pairing, or to repeat an
-interrupted pairing that updated only one device. Restart both devices afterward;
-the radio loads its key at startup. Pairing survives normal firmware updates.
+interrupted pairing that updated only one device. The command prints the restart
+step when it finishes: restart both devices so the radio loads its key at startup
+(unplug and replug the dongle; set the keyboard to dongle mode and unplug its
+USB). Pairing survives normal firmware updates.
 
 Set the keyboard switch to dongle mode and unplug its USB cable to use the
 receiver. A working keyboard USB connection takes priority. A charge-only

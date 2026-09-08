@@ -14,6 +14,10 @@ from serial.tools import list_ports
 BOOT_VID = 0x1D50
 BOOT_PID = 0x6170
 
+# Application USB IDs, used to auto-find the shell ports for pairing.
+KB_APP = (0x1D50, 0x615E)   # keyboard application
+DG_APP = (0x1D50, 0x6171)   # receiver application
+
 
 class PairClient:
     """Pairing commands on the USB shell. Secret records are never printed."""
@@ -82,6 +86,46 @@ def make_bond():
     return body + struct.pack('<I', zlib.crc32(body))
 
 
+def _app_ports(vid_pid):
+    return [p.device for p in list_ports.comports() if (p.vid, p.pid) == vid_pid]
+
+
+def _answers_pair_shell(device, target, timeout=3.0):
+    """True if the port responds to `<target> pair status`, i.e. it is the USB
+    shell and not the keyboard's Studio port or some other CDC interface."""
+    try:
+        client = PairClient(device, target)
+    except (OSError, serial.SerialException):
+        return False
+    try:
+        client.command('status')
+        client.read_marker(rb'APX_PAIR_V1 ', timeout=timeout)
+        return True
+    except Exception:
+        return False
+    finally:
+        client.close()
+
+
+def autodetect_port(vid_pid, target, label):
+    """Find the one USB shell port for a device, so pairing needs no --*-port.
+    The keyboard exposes more than one CDC port, so when several match the app
+    USB ID we probe each and keep the one that answers the pairing shell."""
+    candidates = _app_ports(vid_pid)
+    if not candidates:
+        raise RuntimeError(
+            f'No {label} found on USB (looking for {vid_pid[0]:04x}:{vid_pid[1]:04x}). '
+            f'Plug it in and close any open serial terminal, or pass --{label}-port.')
+    if len(candidates) == 1:
+        return candidates[0]
+    shells = [d for d in candidates if _answers_pair_shell(d, target)]
+    if len(shells) == 1:
+        return shells[0]
+    raise RuntimeError(
+        f'Could not pick the {label} shell port automatically (found {", ".join(candidates)}). '
+        f'Pass --{label}-port explicitly.')
+
+
 def pair_devices(keyboard_port, dongle_port, replace=False):
     if keyboard_port == dongle_port:
         raise RuntimeError('Keyboard and dongle must use different ports')
@@ -98,6 +142,8 @@ def pair_devices(keyboard_port, dongle_port, replace=False):
             wrote = True
             c.write(record, replace=state is not None)
         print('Paired keyboard and dongle:', record[4:12].hex())
+        print('Restart both so they load the new key: unplug and replug the dongle, '
+              'then set the keyboard to dongle mode and unplug its USB.')
     except Exception:
         if wrote:
             print('Pairing was interrupted; a device may already have saved it. Reconnect both and repeat with --replace.')
@@ -142,8 +188,8 @@ def main():
     hold = commands.add_parser('hold-bootloader', help='run before reconnecting a hung receiver')
     hold.add_argument('--timeout', type=float, default=30, help='seconds to wait (default: 30)')
     pair = commands.add_parser('pair', help='pair keyboard and receiver over their USB shell ports')
-    pair.add_argument('--keyboard-port', required=True)
-    pair.add_argument('--dongle-port', required=True)
+    pair.add_argument('--keyboard-port', help='keyboard shell port (auto-detected if omitted)')
+    pair.add_argument('--dongle-port', help='receiver shell port (auto-detected if omitted)')
     pair.add_argument('--replace', action='store_true', help='replace an existing pairing on either device')
     update = commands.add_parser('update', help='send a keyboard application through the receiver')
     update.add_argument('--dongle-port', required=True)
@@ -174,7 +220,11 @@ def main():
             parser.exit(1, str(exc) + '\n')
     elif args.command == 'pair':
         try:
-            pair_devices(args.keyboard_port, args.dongle_port, args.replace)
+            keyboard_port = args.keyboard_port or autodetect_port(KB_APP, 'apex', 'keyboard')
+            dongle_port = args.dongle_port or autodetect_port(DG_APP, 'dongle', 'dongle')
+            if not args.keyboard_port or not args.dongle_port:
+                print(f'Using keyboard {keyboard_port} and dongle {dongle_port}.')
+            pair_devices(keyboard_port, dongle_port, args.replace)
         except (RuntimeError, serial.SerialException) as exc:
             parser.exit(1, str(exc) + '\n')
     else:
