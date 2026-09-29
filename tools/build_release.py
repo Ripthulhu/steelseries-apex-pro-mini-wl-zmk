@@ -103,7 +103,7 @@ def verify_release_config(artifact_dir: Path) -> None:
         "APEX_G4B_KBD_CAPTURE": "n",
         "APEX_G4B_KBD_TELEMETRY": "n",
         "APEX_G4B_LITTLEFS": "n",
-        "APEX_G4B_SLEEP_MS": "900000",
+        "APEX_G4B_SLEEP_MS": "3600000",
         "APEX_G4B_STM32_STOP1_IDLE_MS": "0",
         "APEX_G4B_STM32_STOP1_ALLOW_USB": "n",
         "APEX_G4B_UART_EMIT": "n",
