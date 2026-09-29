@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Test report timing across retries, idle queues and cycle-counter wrap."""
 from pathlib import Path
-import subprocess
-import tempfile
+from host_test import compile_and_run
 
 root = Path(__file__).resolve().parents[1]
 source = (root / 'src/apex_radio_probe.c').read_text()
@@ -43,11 +42,5 @@ int main(void) {
     assert(ack_next_latency.count==1 && first_send_at==1000);
 }
 '''
-with tempfile.TemporaryDirectory(prefix='apex-delivery-timing-') as folder:
-    path = Path(folder)
-    (path / 'test.c').write_text(harness + functions + checks)
-    subprocess.run(['cc', '-std=c99', '-Wall', '-Wextra', '-Werror',
-                    '-I', str(root / 'include'), str(path / 'test.c'),
-                    '-o', str(path / 'test')], check=True)
-    subprocess.run([str(path / 'test')], check=True)
+compile_and_run(harness + functions + checks, flags=('-I', str(root / 'include')))
 print('Delivery timing tests passed')

@@ -81,8 +81,6 @@ void apex_radio_release(void)
     k_sem_give(&hid_event);
 }
 
-uint8_t apex_radio_host_leds(void) { return atomic_get(&leds); }
-
 static void iface_ready(const struct device *dev, bool is_ready)
 {
     ARG_UNUSED(dev);

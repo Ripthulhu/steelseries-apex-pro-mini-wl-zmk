@@ -51,7 +51,7 @@
 #if defined(APEX_G4B_FLASHDEV_DTS)
     /* External FM25Q08A SPI-NOR (1 MiB) exposed as a Zephyr flash device by
      * src/flash_spinor_g4b.c (compatible apex,g4b-spinor), driven direct-register
-     * on SPIM0 - no Zephyr SPI/GPIO/PINCTRL, which verify_g4b.py forbids. Only
+     * on SPIM0 without Zephyr SPI/GPIO/PINCTRL drivers. Only
      * present when the feature is on, so the default internal-NVS build carries no
      * dangling flash-map reference (a stray node with no compiled driver breaks
      * the link with __device_dts_ord_NN undefined).
@@ -109,8 +109,7 @@
      * No bus node, for the same reason as rgb_strip below: the driver in
      * src/battery_bq_g4b.c reads it through src/twi_g4b.c, which drives legacy
      * TWI1 (SCL P0.16, SDA P0.17) by direct register access. Putting it on a
-     * Zephyr i2c bus would pull in CONFIG_I2C, which this build forces off and
-     * verify_g4b.py fails on.
+     * Zephyr i2c bus would pull in CONFIG_I2C, which this build forces off.
      */
     batt_bq: batt_bq {
         compatible = "apex,battery-bq25895";

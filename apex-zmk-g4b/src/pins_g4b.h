@@ -3,7 +3,7 @@
  * The single choke point for every GPIO access in the G4B payload.
  *
  * No other G4B source file may touch P0/P1 OUT, OUTSET, OUTCLR, DIR or PIN_CNF.
- * verify_g4b.py greps every source except pins_g4b.c for those names and fails
+ * verify_g4b_plain.py checks source files for those names and fails
  * on any hit. The reason is narrow and specific: on this board a mis-driven pin
  * is not a bug that shows up as a wrong answer, it is a bug that shows up as
  * silence, and silence here is indistinguishable from "the STM32 never came up".
@@ -97,7 +97,7 @@ uint32_t g4b_pin_cnf_read(enum g4b_port port, enum g4b_pin pin);
 /* Claim and release the charger bus pins.
  *
  * Here rather than in twi_g4b.c because this file is the sole owner of the
- * GPIO registers - verify_g4b.py fails the build if anything else touches
+ * GPIO registers - verify_g4b_plain.py rejects other source files touching
  * them, and that check is worth more than the convenience of configuring a
  * pin next to the peripheral that uses it.
  *
@@ -152,8 +152,10 @@ uint32_t g4b_gpiote_config0(void);
 /* GPIOTE channel 1 on the STM32 attention line (P0.24), interrupt-driven: the
  * ISR gives a semaphore on each rising edge (a queued key event). g4b_attn_wait()
  * blocks the scan loop until an edge OR timeout_ms elapses, so a fresh keypress
- * wakes it immediately instead of at the next poll tick. Call configure() once
- * before the loop; wait() replaces the loop's idle k_msleep. */
+ * wakes it immediately instead of at the next poll tick. During wait(), both
+ * IN channels are parked and low-power PORT/SENSE handles ATTN instead. READY
+ * is level-checked on the next transfer, so no READY edge is needed while idle.
+ * Call configure() once before the loop; wait() replaces idle k_msleep. */
 void g4b_gpiote_attn_configure(void);
 int g4b_attn_wait(uint32_t timeout_ms);
 #if (defined(CONFIG_APEX_G4B_STM32_STOP1_IDLE_MS) && \

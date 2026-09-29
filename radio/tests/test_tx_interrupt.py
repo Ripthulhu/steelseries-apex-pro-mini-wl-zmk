@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Exercise the TX-completion ISR for both the direct RADIO and EGU routes."""
 from pathlib import Path
-import subprocess
-import tempfile
+from host_test import compile_and_run
 
 root = Path(__file__).resolve().parents[1]
 source = (root / 'src/apex_radio_probe.c').read_text()
@@ -63,12 +62,7 @@ int main(void) {
     return 0;
 }
 '''
-with tempfile.TemporaryDirectory(prefix='apex-tx-irq-') as folder:
-    path = Path(folder)
-    (path / 'test.c').write_text(harness + handler + checks)
-    for keyboard in (0, 1):
-        subprocess.run(['cc', '-std=c99', '-Wall', '-Wextra', '-Werror',
-                        f'-DKEYBOARD_EVENT_RX={keyboard}', str(path / 'test.c'),
-                        '-o', str(path / 'test')], check=True)
-        subprocess.run([str(path / 'test')], check=True)
+for keyboard in (0, 1):
+    compile_and_run(harness + handler + checks,
+                    flags=(f'-DKEYBOARD_EVENT_RX={keyboard}',))
 print('Transmit interrupt tests passed')

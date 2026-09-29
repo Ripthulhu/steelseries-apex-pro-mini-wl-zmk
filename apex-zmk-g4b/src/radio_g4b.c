@@ -11,6 +11,7 @@
 #include <zephyr/init.h>
 #include <zephyr/kernel.h>
 #include <zephyr/bluetooth/bluetooth.h>
+#include <zephyr/sys/printk.h>
 
 #include "evidence_g4b.h"
 #include "mode_g4b.h"
@@ -39,39 +40,15 @@ bool g4b_radio_stood_down(void)
 /* "APXRADIO req=1 rdy=1 down=1 err=0 wait=150\r\n" - one line, best-effort. */
 static void standdown_emit(void)
 {
-	static const char hexd[] = "0123456789abcdef";
-	uint8_t line[64];
-	uint32_t n = 0u;
-	const char *tag = "APXRADIO req=";
-
-	for (const char *p = tag; *p; p++) {
-		line[n++] = (uint8_t)*p;
+	char line[64];
+	int n = snprintk(line, sizeof(line),
+		"APXRADIO req=%u rdy=%u down=%u err=%d wait=%u\r\n",
+		(unsigned int)!!status.requested, (unsigned int)!!status.bt_ready,
+		(unsigned int)!!status.stood_down, (int)status.disable_err,
+		(unsigned int)status.wait_ms);
+	if (n > 0) {
+		g4b_evidence_emit_text((const uint8_t *)line, MIN((size_t)n, sizeof(line) - 1u));
 	}
-	line[n++] = status.requested ? '1' : '0';
-	line[n++] = ' '; line[n++] = 'r'; line[n++] = 'd'; line[n++] = 'y'; line[n++] = '=';
-	line[n++] = status.bt_ready ? '1' : '0';
-	line[n++] = ' '; line[n++] = 'd'; line[n++] = 'o'; line[n++] = 'w'; line[n++] = 'n'; line[n++] = '=';
-	line[n++] = status.stood_down ? '1' : '0';
-	line[n++] = ' '; line[n++] = 'e'; line[n++] = 'r'; line[n++] = 'r'; line[n++] = '=';
-	/* err as signed decimal, small range */
-	{
-		int v = status.disable_err;
-		if (v < 0) { line[n++] = '-'; v = -v; }
-		if (v >= 100) { line[n++] = hexd[(v / 100) % 10]; }
-		if (v >= 10)  { line[n++] = hexd[(v / 10) % 10]; }
-		line[n++] = hexd[v % 10];
-	}
-	line[n++] = ' '; line[n++] = 'w'; line[n++] = 'a'; line[n++] = 'i'; line[n++] = 't'; line[n++] = '=';
-	{
-		uint32_t w = status.wait_ms;
-		if (w >= 1000u) { line[n++] = hexd[(w / 1000u) % 10u]; }
-		if (w >= 100u)  { line[n++] = hexd[(w / 100u) % 10u]; }
-		if (w >= 10u)   { line[n++] = hexd[(w / 10u) % 10u]; }
-		line[n++] = hexd[w % 10u];
-	}
-	line[n++] = '\r'; line[n++] = '\n';
-
-	g4b_evidence_emit_text(line, n);
 }
 
 static void standdown_work_fn(struct k_work *work);

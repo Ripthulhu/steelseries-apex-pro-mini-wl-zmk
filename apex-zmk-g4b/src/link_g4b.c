@@ -449,7 +449,7 @@ static void s2_fill_head(struct g4b_s2_head *head, uint16_t version,
  * comparison, so changing where a key actuates needs no analog readout at all.
  *
  * Patched here rather than in apex_boot_prefix.h on purpose. That header is a
- * frozen capture whose sha256 verify_g4b.py re-derives, and it doubles as the
+ * frozen capture whose sha256 tools/verify_release.py checks, and it doubles as the
  * replay's reference response. Editing it would break both. Patching the TX
  * copy is safe because the reply does NOT echo the data: a threshold frame
  * answers { opcode, count, start } and then zeros, so expect_rx is unaffected

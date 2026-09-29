@@ -147,16 +147,18 @@ The recovered protocol and PHY details are in
 
 ## Build checks
 
-`verify_g4b_plain.py` is the active Adafruit-image checker. It never builds or
-flashes. Every `--plain-image` build runs it after generating `.bin`, `.hex`, and
-`.uf2`; it checks application bounds, vectors and RAM, exact artifact bytes,
+`verify_g4b_plain.py` checks diagnostic Adafruit images. It never builds or
+flashes. Non-shell builds run it after generating `.bin`, `.hex`, and `.uf2`;
+it checks application bounds, vectors and RAM, exact artifact bytes,
 every UF2 block and family ID, release configuration, DC/DC mode, matching A/B
 layouts in the application and bootloader, required USB patches, USB selection
 on battery power, and RGB bus shutdown and restart order.
 
-`verify_g4b.py` and `package_g4b.py` check the retired SteelSeries vendor-wrapper
-format. Release builds use `--plain-image`, which links the application at
-`0x1000` for the Adafruit bootloader.
+Direct shell/debug builds skip that policy. `tools/build_release.py` always runs
+the full image audit, including for the shipped shell build, as well as enforcing
+the release configuration and verifying the final UF2. Release builds
+use `--plain-image`, which links the application at `0x1000` for the Adafruit
+bootloader. The retired SteelSeries vendor-wrapper build tools have been removed.
 
 ## Building and flashing
 

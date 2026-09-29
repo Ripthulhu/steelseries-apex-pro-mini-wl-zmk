@@ -27,6 +27,8 @@ jobs:
           python tools/setup_workspace.py --help
           python tools/build_release.py --help
           python apex-zmk-g4b/build_g4b.py --help
+          python apex-zmk-g4b/test_build_g4b.py
+          python apex-zmk-g4b/test_verify_g4b_plain.py
           python installer/build_migration.py --help
           python apex-zmk-slot/scripts/build.py --help
           python tools/build_dongle.py --help

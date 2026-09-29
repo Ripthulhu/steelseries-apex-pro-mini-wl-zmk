@@ -15,17 +15,10 @@ extern const uint32_t mbr_image[];
 void readback_report(uint8_t *out)
 {
     uint32_t offset = DUMP_CURSOR;
-#ifdef DONGLE_ACL_READBACK
-    if (offset >= 128u) offset = 0;
-    uint32_t address = 0x4001e800u + offset;
-    uint32_t limit = 128u;
-    uint32_t source = 0x2001f880u + offset;
-#else
     if (offset >= 0x81000u) offset = 0;
     uint32_t address = offset < 0x80000u ? offset : 0x10001000u + offset - 0x80000u;
     uint32_t limit = offset < 0x80000u ? 0x80000u : 0x81000u;
     uint32_t source = address;
-#endif
     uint32_t size = limit - offset;
     if (size > 56) size = 56;
     out[0] = 'D'; out[1] = 'M'; out[2] = 'P'; out[3] = '1';
@@ -121,9 +114,6 @@ __attribute__((noreturn)) void migrate(void)
     DIAG[15] = REG(0x10001304);
 #ifdef DONGLE_READBACK
     DUMP_CURSOR = 0;
-#endif
-#ifdef DONGLE_ACL_READBACK
-    for (unsigned i = 0; i < 32; ++i) REG(0x2001f880 + 4*i) = REG(0x4001e800 + 4*i);
 #endif
 #ifdef DONGLE_INSPECT_ONLY
     stock_start();

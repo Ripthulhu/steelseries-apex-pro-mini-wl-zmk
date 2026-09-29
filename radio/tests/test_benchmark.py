@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Check the bounded benchmark and verify it never generates key presses."""
 from pathlib import Path
-import subprocess
-import tempfile
+from host_test import compile_and_run
 
 root = Path(__file__).resolve().parents[1]
 source = (root / 'src/apex_radio_probe.c').read_text()
@@ -107,11 +106,5 @@ int main(void) {
     assert(apex_radio_benchmark(&sh,3,paced)==-EINVAL);
 }
 '''
-with tempfile.TemporaryDirectory(prefix='apex-benchmark-') as folder:
-    path = Path(folder)
-    (path / 'test.c').write_text(harness + function + checks)
-    subprocess.run(['cc', '-std=c99', '-Wall', '-Wextra', '-Werror',
-                    '-I', str(root / 'include'), str(path / 'test.c'),
-                    '-o', str(path / 'test')], check=True)
-    subprocess.run([str(path / 'test')], check=True)
+compile_and_run(harness + function + checks, flags=('-I', str(root / 'include')))
 print('Benchmark tests passed')

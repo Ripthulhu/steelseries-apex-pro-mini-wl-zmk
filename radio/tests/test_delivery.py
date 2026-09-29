@@ -2,8 +2,7 @@
 """Compile and exercise the radio delivery queues without accessing hardware."""
 import argparse
 from pathlib import Path
-import subprocess
-import tempfile
+from host_test import compile_and_run
 
 
 def main():
@@ -11,14 +10,9 @@ def main():
     parser.add_argument('--cc', default='cc')
     args = parser.parse_args()
     radio = Path(__file__).resolve().parents[1]
-    with tempfile.TemporaryDirectory(prefix='apex-delivery-') as folder:
-        binary = Path(folder) / 'delivery-test'
-        subprocess.run([args.cc, '-std=c99', '-Wall', '-Wextra', '-Werror',
-                        '-fsanitize=undefined', '-I', str(radio / 'include'),
-                        str(radio / 'tests/delivery_fixture.c'),
-                        str(radio / 'src/apex_delivery.c'), str(radio / 'src/apex_input.c'),
-                        '-o', str(binary)], check=True)
-        subprocess.run([str(binary)], check=True)
+    compile_and_run((radio / 'tests/delivery_fixture.c').read_text(), cc=args.cc,
+                    flags=('-fsanitize=undefined', '-I', str(radio / 'include')),
+                    sources=(radio / 'src/apex_delivery.c', radio / 'src/apex_input.c'))
     print('Delivery queue tests passed')
 
 

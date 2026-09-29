@@ -7,8 +7,7 @@
  * answers sensor_sample_fetch_chan() and sensor_channel_get(), and does not
  * care how that device reaches hardware. So the sensor API is implemented over
  * the direct-register TWI path in twi_g4b.c rather than over Zephyr's I2C
- * stack. That keeps CONFIG_I2C / SPI / GPIO / PINCTRL off, which verify_g4b.py
- * enforces and which the whole payload is built around.
+ * stack. That keeps CONFIG_I2C / SPI / GPIO / PINCTRL off.
  *
  * WHY FETCH IS DEFERRED TO ITS OWN CALL. A conversion takes tens of
  * milliseconds and this runs on ZMK's low-priority work queue, not the scan

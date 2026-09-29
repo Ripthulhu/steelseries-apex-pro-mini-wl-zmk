@@ -14,6 +14,7 @@
 #include <zephyr/init.h>
 #include <zephyr/fatal.h>
 #include <zephyr/arch/cpu.h>     /* struct arch_esf, _callee_saved_t */
+#include <zephyr/sys/printk.h>
 
 #include <nrfx.h>
 
@@ -208,123 +209,64 @@ bool g4b_coredump_read_last(struct g4b_coredump_record *out)
 #if IS_ENABLED(CONFIG_APEX_G4B_UART_EVIDENCE) && \
     (IS_ENABLED(CONFIG_APEX_G4B_UART_EMIT) || \
      IS_ENABLED(CONFIG_APEX_G4B_EVIDENCE_USB))
-static uint32_t cd_puthex(uint8_t *line, uint32_t n, uint32_t v)
-{
-    static const char hexd[] = "0123456789abcdef";
-
-    for (int shift = 28; shift >= 0; shift -= 4) {
-        line[n++] = (uint8_t)hexd[(v >> shift) & 0xFu];
-    }
-    return n;
-}
-
-static uint32_t cd_puttag(uint8_t *line, uint32_t n, const char *tag)
-{
-    while (*tag != '\0') {
-        line[n++] = (uint8_t)*tag++;
-    }
-    return n;
-}
-
 void g4b_coredump_emit_last(void)
 {
     const struct g4b_coredump_record *r = &g4b_cd_last;
-    uint8_t line[96];
-    uint32_t n;
+    char line[96];
+    int n;
 
     if (!g4b_cd_have_last) {
         return;
     }
 
     /* Header: seq, fault reason, resetreas, PC, LR, xPSR. */
-    n = cd_puttag(line, 0u, "APXCD seq=");
-    n = cd_puthex(line, n, r->seq);
-    n = cd_puttag(line, n, " rsn=");
-    n = cd_puthex(line, n, r->reason);
-    n = cd_puttag(line, n, " rr=");
-    n = cd_puthex(line, n, r->resetreas);
-    n = cd_puttag(line, n, " pc=");
-    n = cd_puthex(line, n, r->pc);
-    n = cd_puttag(line, n, " lr=");
-    n = cd_puthex(line, n, r->lr);
-    n = cd_puttag(line, n, " psr=");
-    n = cd_puthex(line, n, r->xpsr);
-    line[n++] = 13; line[n++] = 10;
-    g4b_evidence_emit_text(line, n);
+    n = snprintk(line, sizeof(line),
+                "APXCD seq=%08x rsn=%08x rr=%08x pc=%08x lr=%08x psr=%08x\r\n",
+                (unsigned int)r->seq, r->reason, r->resetreas, r->pc, r->lr, r->xpsr);
+    if (n > 0) {
+        g4b_evidence_emit_text((const uint8_t *)line, MIN((size_t)n, sizeof(line) - 1u));
+    }
 
     /* Fault status registers. */
-    n = cd_puttag(line, 0u, "APXCD cfsr=");
-    n = cd_puthex(line, n, r->cfsr);
-    n = cd_puttag(line, n, " hfsr=");
-    n = cd_puthex(line, n, r->hfsr);
-    n = cd_puttag(line, n, " bfar=");
-    n = cd_puthex(line, n, r->bfar);
-    n = cd_puttag(line, n, " mmfar=");
-    n = cd_puthex(line, n, r->mmfar);
-    line[n++] = 13; line[n++] = 10;
-    g4b_evidence_emit_text(line, n);
+    n = snprintk(line, sizeof(line), "APXCD cfsr=%08x hfsr=%08x bfar=%08x mmfar=%08x\r\n",
+                r->cfsr, r->hfsr, r->bfar, r->mmfar);
+    if (n > 0) {
+        g4b_evidence_emit_text((const uint8_t *)line, MIN((size_t)n, sizeof(line) - 1u));
+    }
 
     /* R0-R3, R12. */
-    n = cd_puttag(line, 0u, "APXCD r0=");
-    n = cd_puthex(line, n, r->r0);
-    n = cd_puttag(line, n, " r1=");
-    n = cd_puthex(line, n, r->r1);
-    n = cd_puttag(line, n, " r2=");
-    n = cd_puthex(line, n, r->r2);
-    n = cd_puttag(line, n, " r3=");
-    n = cd_puthex(line, n, r->r3);
-    n = cd_puttag(line, n, " r12=");
-    n = cd_puthex(line, n, r->r12);
-    line[n++] = 13; line[n++] = 10;
-    g4b_evidence_emit_text(line, n);
+    n = snprintk(line, sizeof(line), "APXCD r0=%08x r1=%08x r2=%08x r3=%08x r12=%08x\r\n",
+                r->r0, r->r1, r->r2, r->r3, r->r12);
+    if (n > 0) {
+        g4b_evidence_emit_text((const uint8_t *)line, MIN((size_t)n, sizeof(line) - 1u));
+    }
 
     /* R4-R11 (zero unless CONFIG_EXTRA_EXCEPTION_INFO captured them). */
-    n = cd_puttag(line, 0u, "APXCD r4=");
-    n = cd_puthex(line, n, r->r4);
-    n = cd_puttag(line, n, " r5=");
-    n = cd_puthex(line, n, r->r5);
-    n = cd_puttag(line, n, " r6=");
-    n = cd_puthex(line, n, r->r6);
-    n = cd_puttag(line, n, " r7=");
-    n = cd_puthex(line, n, r->r7);
-    line[n++] = 13; line[n++] = 10;
-    g4b_evidence_emit_text(line, n);
+    n = snprintk(line, sizeof(line), "APXCD r4=%08x r5=%08x r6=%08x r7=%08x\r\n",
+                r->r4, r->r5, r->r6, r->r7);
+    if (n > 0) {
+        g4b_evidence_emit_text((const uint8_t *)line, MIN((size_t)n, sizeof(line) - 1u));
+    }
 
-    n = cd_puttag(line, 0u, "APXCD r8=");
-    n = cd_puthex(line, n, r->r8);
-    n = cd_puttag(line, n, " r9=");
-    n = cd_puthex(line, n, r->r9);
-    n = cd_puttag(line, n, " r10=");
-    n = cd_puthex(line, n, r->r10);
-    n = cd_puttag(line, n, " r11=");
-    n = cd_puthex(line, n, r->r11);
-    line[n++] = 13; line[n++] = 10;
-    g4b_evidence_emit_text(line, n);
+    n = snprintk(line, sizeof(line), "APXCD r8=%08x r9=%08x r10=%08x r11=%08x\r\n",
+                r->r8, r->r9, r->r10, r->r11);
+    if (n > 0) {
+        g4b_evidence_emit_text((const uint8_t *)line, MIN((size_t)n, sizeof(line) - 1u));
+    }
 
-    /* Stack pointers + the first eight words of the captured slice. */
-    n = cd_puttag(line, 0u, "APXCD sp=");
-    n = cd_puthex(line, n, r->sp);
-    n = cd_puttag(line, n, " msp=");
-    n = cd_puthex(line, n, r->msp);
-    n = cd_puttag(line, n, " psp=");
-    n = cd_puthex(line, n, r->psp);
-    n = cd_puttag(line, n, " excret=");
-    n = cd_puthex(line, n, r->exc_return);
-    n = cd_puttag(line, n, " sv=");
-    n = cd_puthex(line, n, r->stack_valid);
-    line[n++] = 13; line[n++] = 10;
-    g4b_evidence_emit_text(line, n);
+    /* Stack pointers, followed by the captured slice. */
+    n = snprintk(line, sizeof(line), "APXCD sp=%08x msp=%08x psp=%08x excret=%08x sv=%08x\r\n",
+                r->sp, r->msp, r->psp, r->exc_return, r->stack_valid);
+    if (n > 0) {
+        g4b_evidence_emit_text((const uint8_t *)line, MIN((size_t)n, sizeof(line) - 1u));
+    }
 
     for (uint32_t w = 0u; w < G4B_COREDUMP_STACK_WORDS; w += 4u) {
-        n = cd_puttag(line, 0u, "APXCD stk");
-        n = cd_puthex(line, n, w);
-        line[n++] = '=';
-        for (uint32_t k = 0u; k < 4u; k++) {
-            n = cd_puthex(line, n, r->stack[w + k]);
-            line[n++] = ' ';
+        n = snprintk(line, sizeof(line), "APXCD stk%08x=%08x %08x %08x %08x \r\n",
+                    w, r->stack[w], r->stack[w + 1u], r->stack[w + 2u], r->stack[w + 3u]);
+        if (n > 0) {
+            g4b_evidence_emit_text((const uint8_t *)line, MIN((size_t)n, sizeof(line) - 1u));
         }
-        line[n++] = 13; line[n++] = 10;
-        g4b_evidence_emit_text(line, n);
     }
 }
 

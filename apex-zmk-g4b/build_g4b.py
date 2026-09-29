@@ -8,7 +8,6 @@ import json
 import os
 import re
 import shutil
-import struct
 import subprocess
 import sys
 from pathlib import Path
@@ -89,13 +88,11 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--stage", type=int, choices=range(8), default=1)
     parser.add_argument("--work-root", type=Path)
-    parser.add_argument("--beacon-state", action="store_true")
     parser.add_argument("--kscan-ingest", action="store_true")
     parser.add_argument("--studio", action="store_true")
     parser.add_argument("--no-ble", action="store_true")
     parser.add_argument("--dump-loader", action="store_true")
     parser.add_argument("--usb-studio", action="store_true")
-    parser.add_argument("--high-wrapper", action="store_true")
     parser.add_argument("--persistent", action="store_true")
     parser.add_argument("--plain-image", action="store_true")
     parser.add_argument("--shell", action="store_true",
@@ -116,7 +113,12 @@ def parse_args() -> argparse.Namespace:
         metavar="FILE",
         help="append a Kconfig fragment after the selected build configuration",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    if not any((args.plain_image, args.shell, args.ble_shell,
+                args.stop1_canary, args.wireless_idle, args.ab_rollback)):
+        parser.error("vendor-wrapper builds are retired; use tools/build_release.py "
+                     "or select --plain-image for an Adafruit diagnostic build")
+    return args
 
 
 def main() -> int:
@@ -141,16 +143,11 @@ def main() -> int:
             fail(f"{name} is limited to the stage-3 USB/Bluetooth build")
     if args.ab_crash_test and not args.ab_rollback:
         fail("--ab-crash-test requires --ab-rollback")
-    if args.stop1_canary or args.wireless_idle or args.ab_rollback:
-        args.plain_image = True
     if args.ble_shell:
         args.shell = True
     if args.shell:
         if not args.usb_studio:
             fail("--shell requires --usb-studio (uses g4b_usb.conf + g4b_usb.overlay)")
-        args.plain_image = True
-    if args.usb_studio:
-        args.high_wrapper = True
 
     flavor = "-stop1-canary" if args.stop1_canary else (
         "-wireless-idle" if args.wireless_idle else ""
@@ -206,10 +203,8 @@ def main() -> int:
             fail(f"configuration file is missing: {path}")
 
     overlay = "g4b_usb.overlay" if args.usb_studio else (
-        "g4b_high.overlay" if args.high_wrapper else (
-            "g4b6.overlay" if args.stage == 6 else (
-                "g4b7.overlay" if args.stage == 7 or args.persistent else "g4b.overlay"
-            )
+        "g4b6.overlay" if args.stage == 6 else (
+            "g4b7.overlay" if args.stage == 7 or args.persistent else "g4b.overlay"
         )
     )
     flash_dev = bool(re.search(
@@ -268,104 +263,54 @@ def main() -> int:
     ], env=env)
     run([cmake, "--build", build_dir], env=env)
 
-    if args.plain_image:
-        expected_parent = HERE if in_work_tree else work_root
-        expected_name = f"artifacts{flavor}" if in_work_tree else (
-            f"artifacts-repo-apex-zmk-g4b{flavor}"
-        )
-        if artifact_dir.parent != expected_parent or artifact_dir.name != expected_name:
-            fail(f"refusing to clear unexpected artifact directory: {artifact_dir}")
-        remove_directory(artifact_dir)
-        artifact_dir.mkdir(parents=True)
-        zephyr_out = build_dir / "zephyr"
-        outputs = {
-            "zmk.hex": "apex-zmk-g4b.plain.hex",
-            "zmk.bin": "apex-zmk-g4b.plain.bin",
-            "zmk.elf": "apex-zmk-g4b.plain.elf",
-            ".config": "apex-zmk-g4b.plain.config",
-        }
-        for source_name, destination_name in outputs.items():
-            source = zephyr_out / source_name
-            if source.is_file():
-                shutil.copy2(source, artifact_dir / destination_name)
-        nm = executable(sdk / "arm-zephyr-eabi" / "bin", "arm-zephyr-eabi-nm")
-        run([nm, "-n", "-S", zephyr_out / "zmk.elf"],
-            stdout=artifact_dir / "apex-zmk-g4b.plain.symbols.txt")
-        image = artifact_dir / "apex-zmk-g4b.plain.hex"
-        uf2conv = work_root / "tools" / "adafruit-boot" / "lib" / "uf2" / "utils" / "uf2conv.py"
-        if not uf2conv.is_file():
-            fail(f"UF2 converter is missing: {uf2conv}; run tools/setup_workspace.py")
-        run([python, uf2conv, "-c", "-f", "0x621E937A", "-o",
-             artifact_dir / "apex-zmk-g4b.plain.uf2", image])
-        verify = [
-            python, HERE / "verify_g4b_plain.py", f"--build-dir={build_dir}",
-            f"--artifact-dir={artifact_dir}", f"--zephyr-base={upstream / 'zephyr'}",
-            f"--expect-stage={args.stage}",
-        ]
-        if args.stop1_canary:
-            verify.append("--stop1-canary")
-        if args.wireless_idle:
-            verify.append("--wireless-idle")
-        if args.ab_rollback:
-            verify.append("--ab-v2")
-        if args.ab_crash_test:
-            verify.append("--ab-crash-test")
-        if args.shell:
-            print("Shell/debug build: skipping the release plain-image audit "
-                  "(SHELL/LOG are intentionally present).")
-        else:
-            run(verify)
-        print(f"PlainImage: {image} ({image.stat().st_size} bytes)")
-        print("Plain build complete. Nothing was flashed.")
-        return 0
-
-    tool_bin = sdk / "arm-zephyr-eabi" / "bin"
-    gcc = executable(tool_bin, "arm-zephyr-eabi-gcc")
-    objcopy = executable(tool_bin, "arm-zephyr-eabi-objcopy")
-    objdump = executable(tool_bin, "arm-zephyr-eabi-objdump")
-    readelf = executable(tool_bin, "arm-zephyr-eabi-readelf")
-    nm = executable(tool_bin, "arm-zephyr-eabi-nm")
-    failsafe = work_root / "apex-zephyr-ble-canary" / "failsafe_handoff.S"
-    linker = work_root / "apex-zephyr-usb-canary" / (
-        "failsafe_high.ld" if args.high_wrapper else "failsafe.ld"
+    expected_parent = HERE if in_work_tree else work_root
+    expected_name = f"artifacts{flavor}" if in_work_tree else (
+        f"artifacts-repo-apex-zmk-g4b{flavor}"
     )
-    wrapper_address = "0x00065000" if args.high_wrapper else "0x0004C000"
+    if artifact_dir.parent != expected_parent or artifact_dir.name != expected_name:
+        fail(f"refusing to clear unexpected artifact directory: {artifact_dir}")
     remove_directory(artifact_dir)
     artifact_dir.mkdir(parents=True)
-    image_data = (build_dir / "zephyr" / "zmk.bin").read_bytes()
-    sp, reset = struct.unpack_from("<II", image_data)
-    common = [
-        "-mcpu=cortex-m4", "-mthumb", "-mfloat-abi=soft", "-ffreestanding",
-        "-fno-builtin", "-fno-stack-protector", "-fno-unwind-tables",
-        "-fno-asynchronous-unwind-tables", "-ffunction-sections",
-        "-fdata-sections", "-Os", "-Wall", "-Wextra", "-Werror",
+    zephyr_out = build_dir / "zephyr"
+    outputs = {
+        "zmk.hex": "apex-zmk-g4b.plain.hex",
+        "zmk.bin": "apex-zmk-g4b.plain.bin",
+        "zmk.elf": "apex-zmk-g4b.plain.elf",
+        ".config": "apex-zmk-g4b.plain.config",
+    }
+    for source_name, destination_name in outputs.items():
+        source = zephyr_out / source_name
+        if source.is_file():
+            shutil.copy2(source, artifact_dir / destination_name)
+    nm = executable(sdk / "arm-zephyr-eabi" / "bin", "arm-zephyr-eabi-nm")
+    run([nm, "-n", "-S", zephyr_out / "zmk.elf"],
+        stdout=artifact_dir / "apex-zmk-g4b.plain.symbols.txt")
+    image = artifact_dir / "apex-zmk-g4b.plain.hex"
+    uf2conv = work_root / "tools" / "adafruit-boot" / "lib" / "uf2" / "utils" / "uf2conv.py"
+    if not uf2conv.is_file():
+        fail(f"UF2 converter is missing: {uf2conv}; run tools/setup_workspace.py")
+    run([python, uf2conv, "-c", "-f", "0x621E937A", "-o",
+         artifact_dir / "apex-zmk-g4b.plain.uf2", image])
+    verify = [
+        python, HERE / "verify_g4b_plain.py", f"--build-dir={build_dir}",
+        f"--artifact-dir={artifact_dir}", f"--zephyr-base={upstream / 'zephyr'}",
+        f"--expect-stage={args.stage}",
     ]
-    beacon = ["-DUART_BOOT_BEACON", "-DUART_BOOT_BEACON_RESETREAS"]
-    if args.beacon_state:
-        beacon.append("-DUART_BOOT_BEACON_STATE")
-    run([gcc, *common, "-x", "assembler-with-cpp", f"-DCANARY_SP=0x{sp:08x}",
-         f"-DCANARY_RESET=0x{reset:08x}", "-DWDT_CRV_TICKS=0x001E0000",
-         "-DWDT_RREN_MASK=0x00000080", "-DRETAINED_RECOVERY_COOKIE=0x42",
-         *beacon, "-c", failsafe, "-o", artifact_dir / "failsafe.o"])
-    run([gcc, *common, "-nostdlib", "-Wl,--gc-sections",
-         f"-Wl,-Map,{artifact_dir / 'failsafe.map'}", "-T", linker,
-         artifact_dir / "failsafe.o", "-o", artifact_dir / "failsafe.elf"])
-    run([objcopy, "-O", "binary", artifact_dir / "failsafe.elf",
-         artifact_dir / "failsafe.bin"])
-    run([objdump, "-d", artifact_dir / "failsafe.elf"],
-        stdout=artifact_dir / "failsafe.disasm.txt")
-    run([readelf, "-lW", build_dir / "zephyr" / "zmk.elf"],
-        stdout=artifact_dir / "zmk.segments.txt")
-    run([nm, "-n", build_dir / "zephyr" / "zmk.elf"],
-        stdout=artifact_dir / "zmk.symbols.txt")
-    run([python, HERE / "package_g4b.py", build_dir / "zephyr" / "zmk.bin",
-         artifact_dir / "failsafe.bin", artifact_dir / "apex-zmk-g4b.vendor.bin",
-         f"--expect-sp=0x{sp:08x}", f"--expect-reset=0x{reset:08x}",
-         f"--wrapper-address={wrapper_address}"])
-    run([python, HERE / "verify_g4b.py", f"--expect-stage={args.stage}",
-         f"--build-dir={build_dir}", f"--artifact-dir={artifact_dir}",
-         f"--zephyr-base={upstream / 'zephyr'}"])
-    print("Build, packaging and verification complete. Nothing was flashed.")
+    if args.stop1_canary:
+        verify.append("--stop1-canary")
+    if args.wireless_idle:
+        verify.append("--wireless-idle")
+    if args.ab_rollback:
+        verify.append("--ab-v2")
+    if args.ab_crash_test:
+        verify.append("--ab-crash-test")
+    if args.shell:
+        print("Shell/debug build: skipping the release plain-image audit "
+              "(SHELL/LOG are intentionally present).")
+    else:
+        run(verify)
+    print(f"PlainImage: {image} ({image.stat().st_size} bytes)")
+    print("Plain build complete. Nothing was flashed.")
     return 0
 
 

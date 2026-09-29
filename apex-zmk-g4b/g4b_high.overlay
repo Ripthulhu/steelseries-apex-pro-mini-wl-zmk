@@ -9,11 +9,8 @@
  * at 0x4C000. Moving it to 0x65000 raises the slot to 0x49000 - from 196,608 to
  * 299,008 bytes - which is what makes the USB stack affordable.
  *
- * The wrapper address must be consistent: the vendor loader reads the reset
- * vector from the image start and package_g4b.py writes wrapper_address | 1
- * there, so failsafe_high.ld, --wrapper-address and this code_partition size
- * must all agree. verify_g4b.py derives them from FLASH_LOAD_SIZE rather than
- * hardcoding, so a disagreement fails the build.
+ * Historical vendor-wrapper layout. Its packaging tools have been retired;
+ * the current builder uses g4b_usb.overlay for Adafruit images.
  *
  * settings_nvs.c resolves its partition from `chosen zephyr,settings-partition`
  * or, failing that, from a nodelabel literally called `storage_partition`. Ours

@@ -2,8 +2,7 @@
 """Test receiver reply policy with the actual input handler and wire format."""
 import argparse
 from pathlib import Path
-import subprocess
-import tempfile
+from host_test import compile_and_run
 
 
 def main():
@@ -129,15 +128,9 @@ int main(void) {
     return 0;
 }
 '''
-    with tempfile.TemporaryDirectory(prefix='apex-reply-test-') as folder:
-        path = Path(folder)
-        (path / 'test.c').write_text(harness + handler + checks)
-        binary = path / 'test.exe'
-        subprocess.run([args.cc, '-std=c99', '-Wall', '-Wextra', '-Werror',
-                        '-I', str(root / 'include'), str(path / 'test.c'),
-                        str(root / 'src/apex_input.c'), str(root / 'src/apex_delivery.c'),
-                        '-o', str(binary)], check=True)
-        subprocess.run([str(binary)], check=True)
+    compile_and_run(harness + handler + checks, cc=args.cc,
+                    flags=('-I', str(root / 'include')),
+                    sources=(root / 'src/apex_input.c', root / 'src/apex_delivery.c'))
     print('Input reply tests passed')
 
 

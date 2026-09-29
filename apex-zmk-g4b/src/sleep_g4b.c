@@ -85,7 +85,8 @@ void g4b_sleep_enter(void)
      * analog reading.
      */
     unsigned int irq_key = irq_lock();
-    uint32_t saved_mode_cfg = NRF_P0->PIN_CNF[G4B_SLEEP_MODE_PIN];
+    uint32_t saved_mode_cfg =
+        g4b_pin_cnf_read(G4B_PORT0, (enum g4b_pin)G4B_SLEEP_MODE_PIN);
     g4b_pin_cfg(G4B_PORT0, (enum g4b_pin)G4B_SLEEP_MODE_PIN,
                 G4B_PINCNF_DIR_INPUT | G4B_PINCNF_INBUF_CONN |
                     G4B_PINCNF_PULL_NONE |
@@ -117,7 +118,7 @@ void g4b_sleep_enter(void)
         __NOP();
     }
 resume:
-    NRF_P0->PIN_CNF[G4B_SLEEP_MODE_PIN] = saved_mode_cfg;
+    g4b_pin_cfg(G4B_PORT0, (enum g4b_pin)G4B_SLEEP_MODE_PIN, saved_mode_cfg);
     irq_unlock(irq_key);
 #if IS_ENABLED(CONFIG_APEX_G4B_DONGLE_SLEEP)
     if (dongle) apex_radio_resume();

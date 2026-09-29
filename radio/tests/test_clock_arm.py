@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Check the timed TX deadline guard, including hardware timer wrap."""
 from pathlib import Path
-import subprocess
-import tempfile
+from host_test import compile_and_run
 
 root = Path(__file__).resolve().parents[1]
 source = (root / 'src/apex_radio_probe.c').read_text()
@@ -39,10 +38,5 @@ int main(void) {
     }
 }
 '''
-with tempfile.TemporaryDirectory(prefix='apex-clock-arm-') as folder:
-    path = Path(folder)
-    (path / 'test.c').write_text(harness + function + checks)
-    subprocess.run(['cc', '-std=c99', '-Wall', '-Wextra', '-Werror',
-                    str(path / 'test.c'), '-o', str(path / 'test')], check=True)
-    subprocess.run([str(path / 'test')], check=True)
+compile_and_run(harness + function + checks)
 print('Clock arming tests passed')

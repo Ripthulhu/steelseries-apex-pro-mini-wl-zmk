@@ -20,6 +20,5 @@ uint32_t apex_radio_completed(uint32_t *completed_at);
 int apex_radio_deliver(const struct apex_input_frame *frame);
 void apex_radio_delivery_status(struct apex_delivery_ack *ack);
 void apex_radio_release(void);
-uint8_t apex_radio_host_leds(void);
 void apex_radio_update_leds(uint8_t leds);
 #endif

@@ -2,8 +2,7 @@
 """Test the transport's final transmit check without accessing hardware."""
 import argparse
 from pathlib import Path
-import subprocess
-import tempfile
+from host_test import compile_and_run
 
 
 def main():
@@ -69,15 +68,9 @@ int main(void) {
     return 0;
 }
 '''
-    with tempfile.TemporaryDirectory(prefix='apex-tx-window-') as folder:
-        path = Path(folder)
-        (path / 'test.c').write_text(packet_types + harness + function + checks)
-        binary = path / 'test.exe'
-        for hopping in (0, 1):
-            subprocess.run([args.cc, '-std=c99', '-Wall', '-Wextra', '-Werror',
-                            f'-DHOP_ENABLED={hopping}', '-I', str(root / 'include'),
-                            str(path / 'test.c'), '-o', str(binary)], check=True)
-            subprocess.run([str(binary)], check=True)
+    for hopping in (0, 1):
+        compile_and_run(packet_types + harness + function + checks, cc=args.cc,
+                        flags=(f'-DHOP_ENABLED={hopping}', '-I', str(root / 'include')))
     print('Transmit window tests passed for hopping and fixed-channel builds')
 
 

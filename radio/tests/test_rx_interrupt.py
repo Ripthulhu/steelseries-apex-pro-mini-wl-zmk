@@ -2,8 +2,7 @@
 """Test both receive interrupt handlers without touching hardware."""
 import argparse
 from pathlib import Path
-import subprocess
-import tempfile
+from host_test import compile_and_run
 
 
 def main():
@@ -55,15 +54,9 @@ int main(void) {
     return 0;
 }
 '''
-    with tempfile.TemporaryDirectory(prefix='apex-rx-test-') as folder:
-        path = Path(folder)
-        (path / 'test.c').write_text(harness + handler + checks)
-        binary = path / 'test.exe'
-        for keyboard in (0, 1):
-            subprocess.run([args.cc, '-std=c99', '-Wall', '-Wextra', '-Werror',
-                            f'-DKEYBOARD_EVENT_RX={keyboard}', str(path / 'test.c'),
-                            '-o', str(binary)], check=True)
-            subprocess.run([str(binary)], check=True)
+    for keyboard in (0, 1):
+        compile_and_run(harness + handler + checks, cc=args.cc,
+                        flags=(f'-DKEYBOARD_EVENT_RX={keyboard}',))
     print('Receive interrupt tests passed for keyboard and receiver')
 
 

@@ -114,7 +114,7 @@ def check_gpio_ownership(failures: list[str]) -> None:
 
 
 def check_ab_health_policy(failures: list[str]) -> None:
-    """Keep charge-only VBUS out of the USB health requirement."""
+    """Keep charge-only VBUS out of both wireless modes' USB health requirement."""
     path = Path(__file__).resolve().parent / "src" / "link_g4b.c"
     text = strip_c_comments(path.read_text(encoding="utf-8", errors="replace"))
     match = re.search(
@@ -129,7 +129,7 @@ def check_ab_health_policy(failures: list[str]) -> None:
     body = re.sub(r"\s+", " ", match.group(1))
     required_expressions = (
         r"bool usb_required = s3_usb_is_powered\(\) && "
-        r"\(g4b_mode_get\(\) != G4B_MODE_BT \|\| "
+        r"\(!g4b_mode_is_wireless\(\) \|\| "
         r"zmk_endpoint_get_selected\(\)\.transport == ZMK_TRANSPORT_USB\);",
         r"return !usb_required \|\| zmk_usb_is_hid_ready\(\);",
     )
@@ -139,13 +139,29 @@ def check_ab_health_policy(failures: list[str]) -> None:
     if "zmk_usb_get_status() == USB_DC_CONFIGURED" in body:
         failures.append("A/B health rejects a configured host after USB suspend")
 
+    mode = strip_c_comments((path.parent / "mode_g4b.h").read_text(encoding="utf-8"))
+    if re.search(
+        r"g4b_mode_is_wireless\(void\)\s*\{\s*"
+        r"enum g4b_mode mode = g4b_mode_get\(\);\s*"
+        r"return mode == G4B_MODE_BT \|\| mode == G4B_MODE_DONGLE;\s*\}",
+        mode,
+    ) is None:
+        failures.append("A/B wireless-mode policy must include Bluetooth and dongle")
+
     note = re.search(
         r"static void\s+ab_note_health\s*\([^)]*\)\s*\{(.*?)\n\}",
         text,
         re.DOTALL,
     )
-    if note is None or "ab_output_ready()" not in note.group(1):
+    if note is None or not re.search(
+        r"if\s*\(r == G4B_SPIM_OK && ab_output_ready\(\)\)", note.group(1)
+    ):
         failures.append("A/B scanner-health gate does not use the output policy")
+    elif ("if (++frames >= G4B_AB_HEALTH_FRAMES)" not in note.group(1)
+          or "g4b_ab_mark_healthy();" not in note.group(1)
+          or re.search(r"else\s*\{\s*frames = 0u;\s*\}", note.group(1)) is None
+          or re.search(r"#define\s+G4B_AB_HEALTH_FRAMES\s+8u\b", text) is None):
+        failures.append("A/B health must require eight successful scanner exchanges")
 
 
 def read_config(path: Path) -> dict[str, str]:
@@ -168,7 +184,7 @@ def check_disabled_diagnostics(config: dict[str, str], symbols: str,
         forbidden.extend(("g4b_ab_status_tid", "g4b_coredump_emit_tid"))
 
     for name in forbidden:
-        if re.search(rf"(?m)^[0-9a-fA-F]+\s+\S\s+.*{re.escape(name)}$", symbols):
+        if re.search(rf"(?m)^[0-9a-fA-F]+\s+(?:[0-9a-fA-F]+\s+)?\S\s+.*{re.escape(name)}$", symbols):
             failures.append(f"disabled diagnostic thread remains in the image: {name}")
 
 
@@ -691,10 +707,10 @@ def main() -> int:
             "APEX_G4B_STM32_LONG_IDLE_AFTER_MS",
             failures,
         )
-        if long_mode3_period != 255:
+        if long_mode3_period != 100:
             failures.append(
                 "mode-3 long-idle period is "
-                f"{long_mode3_period}, expected the one-byte maximum 255 ms"
+                f"{long_mode3_period}, expected the reviewed 100 ms"
             )
         if long_mode3_after != 60000:
             failures.append(

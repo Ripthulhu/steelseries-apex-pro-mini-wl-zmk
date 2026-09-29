@@ -2,8 +2,7 @@
 """Check keyboard sleep-entry guards with mocked Nordic registers."""
 import argparse
 from pathlib import Path
-import subprocess
-import tempfile
+from host_test import compile_and_run
 
 
 def main():
@@ -47,8 +46,12 @@ static void g4b_rgb_set_blanked(bool value) { (void)value; }
 static unsigned int irq_lock(void) { irq_depth++; return 7; }
 static void irq_unlock(unsigned int key) { assert(key == 7); irq_depth--; }
 static bool g4b_pin_read(int port, int pin) { (void)port; (void)pin; return attn; }
+static uint32_t g4b_pin_cnf_read(int port, enum g4b_pin pin) {
+    (void)port; return gpio.PIN_CNF[pin];
+}
 static void g4b_pin_cfg(int port, enum g4b_pin pin, uint32_t cfg) {
-    (void)port; sense = cfg; gpio.PIN_CNF[pin] = cfg;
+    (void)port; gpio.PIN_CNF[pin] = cfg;
+    if (cfg & (3u << 16)) sense = cfg; /* Keep the armed SENSE after restore. */
 }
 '''
     checks = r'''
@@ -74,13 +77,7 @@ int main(void) {
     return 0;
 }
 '''
-    with tempfile.TemporaryDirectory(prefix='apex-sleep-test-') as folder:
-        path = Path(folder)
-        (path / 'test.c').write_text(harness + function + checks)
-        binary = path / 'test.exe'
-        subprocess.run([args.cc, '-std=c99', '-Wall', '-Wextra', '-Werror',
-                        str(path / 'test.c'), '-o', str(binary)], check=True)
-        subprocess.run([str(binary)], check=True)
+    compile_and_run(harness + function + checks, cc=args.cc)
     print('Sleep entry guard tests passed')
 
 

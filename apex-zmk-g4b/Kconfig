@@ -1040,32 +1040,6 @@ config APEX_G4B_SPINOR_FLASHDEV_SELFTEST
 	  driver end-to-end. Off by default so production builds don't wear a sector
 	  each boot.
 
-config APEX_G4B_LITTLEFS
-	bool "Mount a LittleFS on the external SPI-NOR free tail"
-	default n
-	depends on APEX_G4B_SPINOR_FLASHDEV
-	depends on FILE_SYSTEM_LITTLEFS
-	help
-	  Mounts a LittleFS at /lfs on littlefs_partition@6b000 (g4b_usb.overlay), a
-	  fixed-partition in the freed 1 MiB external chip's tail - above ZMK NVS
-	  (0x60000-0x68000), the raw provision marker (0x68000), A/B descriptor
-	  (0x69000), and boot tally (0x6A000), ending below the raw write-test
-	  scratch at 0x80000. It does not overlap the app, bootloader, bond store,
-	  or A/B data.
-
-	  Every erase/read/program is routed through the existing apex,g4b-spinor
-	  Zephyr flash device (src/flash_spinor_g4b.c), which already serialises SPIM0
-	  behind the shared g4b_extbus mutex, per-sector lock, and wait_replay gate.
-	  The mount runs from SYS_INIT at APPLICATION priority, before the g4b thread
-	  starts. Mount errors are recorded and do not fail system initialization.
-
-	  No application feature currently reads or writes files on this filesystem.
-
-	  FILE_SYSTEM and FILE_SYSTEM_LITTLEFS are selected here. Neither they nor the
-	  littlefs/lfs/fs_* symbols they link are on verify_g4b.py's forbidden lists;
-	  the flash-stack symbols underneath are the ones already permitted for a
-	  storage build.
-
 config APEX_G4B_COREDUMP
 	bool "Capture CPU faults to a crash ring in the external SPI-NOR"
 	default y

@@ -109,13 +109,18 @@ capacity here. Lower-voltage charging does not guarantee freedom from swelling.
 The wireless power controls have different USB conditions:
 
 - In Bluetooth or dongle mode with no VBUS, the scanner changes from its 1 ms active
-  period to 50 ms after five quiet seconds, then to 255 ms after one minute. The
-  period field is one byte, so 255 ms is its maximum value. P0.24 ATTN wakes the
-  Nordic on a key change and the scanner returns to 1 ms. Physical key wake has
-  been tested from both idle periods. Current draw and first-key latency have
-  not been measured.
+  period to 50 ms after five quiet seconds, then to 100 ms after one minute.
+  P0.24 ATTN wakes the Nordic on a detected key change and the scanner returns
+  to 1 ms. First-key detection can take one idle scan period before ATTN rises.
+  Current draw and end-to-end first-key latency have not been measured.
 - The Nordic link thread sleeps between ATTN, Bluetooth, and housekeeping work.
-  Its 200 ms housekeeping timeout does not delay the ATTN interrupt.
+  Its 200 ms housekeeping timeout does not delay the ATTN interrupt. While
+  waiting it parks both high-frequency GPIOTE IN channels and uses low-power
+  GPIO PORT/SENSE for ATTN; the READY event channel is restored before work.
+- In an established dongle session the keyboard stops RX between completed
+  exchanges, then listens again immediately after transmitting. Discovery and
+  outstanding replies keep RX running. The receiver, hop clock, retry cadence,
+  and HFCLK/TIMER2 are unchanged; this is not full radio-clock shutdown.
 - With no VBUS, sustained pressure across several keys is treated as a keyboard
   packed in a bag. The firmware suppresses the held keys, blanks RGB, and polls
   at 250 ms until the pressure is removed. The thresholds are listed in
@@ -137,13 +142,11 @@ The wireless power controls have different USB conditions:
 The nRF uses its DC/DC converter. Bluetooth requests a 7.5-15 ms connection
 interval with peripheral latency 30; the host chooses the final values.
 
-nRF System OFF uses `CONFIG_APEX_G4B_SLEEP_MS` (15 minutes in the current build).
-Dongle mode additionally requires `CONFIG_APEX_G4B_DONGLE_SLEEP`, enabled by the
-radio-input configuration. Wake reboots the keyboard and reconnects; it is not
-instant and the initial tap may be lost. Key and switch wake in dongle mode passed
-tests with a 60-second timeout; the full 15-minute wait and sleep current have
-not been measured. From dongle sleep, move the switch fully to Bluetooth to wake
-without a key; the middle USB position is not a guaranteed wake level.
+nRF System OFF is disabled in releases (`CONFIG_APEX_G4B_SLEEP_MS=0` and
+`CONFIG_APEX_G4B_DONGLE_SLEEP=n`). The CPU still idles between interrupts in
+System ON, retaining the wireless session without a reboot/reconnect on wake.
+Disabling System OFF alone is not a battery optimization; the GPIO and RX
+changes reduce resources kept active while the keyboard stays connected.
 
 STM32 STOP1 remains disabled: mode 0
 stops the scanner, and neither a key nor the reconstructed link wake sequence

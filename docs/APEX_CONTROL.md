@@ -38,26 +38,49 @@ python repo/apex-zmk-g4b/build_g4b.py --stage 3 --usb-studio --shell
 - appends `g4b_shell.conf` (enables `CONFIG_APEX_G4B_SHELL`, `CONFIG_SHELL`,
   `CONFIG_LOG`, the SWD-replacement tool shells, telemetry, and a bigger Studio
   RPC TX buffer);
-- adds `-DAPEX_G4B_SHELL_DTS` so `g4b_usb.overlay` instantiates a **third USB
-  CDC-ACM** (`shell_cdc`) as `zephyr,shell-uart`;
+- adds `-DAPEX_G4B_SHELL_DTS` so `g4b_usb.overlay` instantiates the shell
+  CDC-ACM (`shell_cdc`) as `zephyr,shell-uart`;
 - implies `--plain-image` and **skips the release audit** (`verify_g4b_plain.py`)
   because SHELL/LOG are intentionally present.
 
 Output UF2: `work/artifacts-repo-apex-zmk-g4b/apex-zmk-g4b.plain.uf2`.
 
-The board then enumerates `1d50:615e` with three CDC ports:
-| Port (example) | Interface | Use |
+The board enumerates `1d50:615e`, but **its USB interfaces are dynamic**.
+Studio USB and the gamepad default off; the shell and DFU CDCs remain present.
+`work/zmk-upstream/app/src/usb.c` omits Studio's `cdc_acm_0` while off, so the
+remaining interfaces move down. The expected mappings for this build are:
+
+| Use | Studio USB off (default) | Studio USB on |
 |---|---|---|
-| COM3 | MI_00 | Studio RPC (`studio_rpc_usb_uart`) |
-| COM12 | MI_02 | DFU trigger (`dfu_cdc`, 1200-baud / `APEXDFU!`) |
-| COM15 | MI_04 | **the `apex` shell** (`shell_cdc`), open at 115200 |
+| Studio RPC (`studio_rpc_usb_uart`) | absent | MI_00 |
+| DFU trigger (`dfu_cdc`, 1200-baud / `APEXDFU!`) | MI_00 | MI_02 |
+| **the `apex` shell** (`shell_cdc`), open at 115200 | MI_02 | MI_04 |
+
+On the 2026-09-30 default-profile check, **COM3 / MI_00 was DFU and
+COM12 / MI_02 was the shell**; MI_04 was the keyboard HID, not a COM port.
+These COM numbers are examples, not stable identities. Studio/gamepad toggles,
+firmware changes, and Windows re-enumeration can change the interface/COM mapping.
+`apex studio on` (or Fn+RCtrl+S) adds Studio USB and re-enumerates; it also drops
+the optional gamepad. Re-identify ports after such changes.
+
+Identify the shell by opening a candidate keyboard CDC port at **115200** and
+sending Enter, then `apex info`: look for the `apex$ ` prompt and dashboard reply.
+A silent port alone does **not** prove it is DFU. Confirm the keyboard's current
+USB profile and interface mapping before using a host-side DFU trigger; do not
+probe unknown ports at 1200 baud, since that deliberately requests a reboot.
 
 ## 3. Flashing (no SWD needed)
 
 DFU over USB, two ways in:
-- **From the shell:** `apex dfu` (writes `GPREGRET=0x57`, resets into APEXBOOT).
-- **From the host:** `apex-zmk-g4b/tools/dfu_flash.py <uf2> COM12`, 1200-baud
-  touch on the dfu_cdc port, waits for the `APEXBOOT` drive, copies the UF2.
+- **From an identified shell:** `apex dfu` (writes `GPREGRET=0x57`, resets into
+  APEXBOOT). This avoids guessing the separate DFU port.
+- **From the host:** `python apex-zmk-g4b/tools/dfu_flash.py <uf2> <dfu-com-port>`.
+  Pass the explicitly identified **DFU** port (for example, COM3 in the default
+  profile above), not the shell port. The script tries a 1200-baud touch, then
+  `APEXDFU!`, waits for the `APEXBOOT` drive, and copies the UF2. Close any terminal
+  using that port first. **Do not omit the port argument:** the script's historical
+  COM12 default is not valid for every profile. Both triggers are bound only to
+  `dfu_cdc` in `src/dfu_trigger_g4b.c`; sending them to the shell does not enter DFU.
 
 Gotcha: the UF2 bootloader flashes and unmounts the drive the instant the file
 lands, so use `shutil.copyfile` (not `copy`), the follow-up chmod throws
@@ -65,8 +88,8 @@ lands, so use `shutil.copyfile` (not `copy`), the follow-up chmod throws
 
 ## 4. `apex` shell command reference
 
-Open the shell port (COM15) at 115200. Every subcommand has `-h`; typing `apex`
-lists them.
+Open the shell port identified in §2 at 115200. Every subcommand has `-h`;
+typing `apex` lists them.
 
 **Logging is quiet by default** so the prompt is usable. Logs are still compiled
 in. Turn them on with `log enable <err|wrn|inf|dbg> [module]` (e.g.
@@ -210,8 +233,9 @@ non-static `zmk_studio_Response apex_<verb>(const zmk_studio_Request*)` handler,
 
 **Testing raw (no client):** the RPC framing is SOF `0xAB` / ESC `0xAC` / EOF
 `0xAD` byte-stuffing around a protobuf `Request`. `apex-zmk-g4b/tools/apex_rpc_test.py` sends
-`apex_get_heatmap` to COM3 and decodes the `Heatmap`. Verified: 144-byte response,
-128 per-key counts.
+`apex_get_heatmap` and decodes the `Heatmap`. Enable Studio USB first and explicitly
+select its current port using §2; the historical COM3 example is not a fixed
+Studio port. Verified: 144-byte response, 128 per-key counts.
 
 **Client + UI (TODO):** the `@zmkfirmware/zmk-studio-ts-client` npm package is
 prebuilt and doesn't know `apex`; regenerate it from the extended proto (ts-proto)
@@ -221,7 +245,8 @@ as a local package in `apex-zmk-studio/`, then build a heatmap panel that polls
 ## 9. Release build
 
 The release keyboard ships one image with the apex shell, the SWD-replacement
-tool shells, and the Studio `apex` RPC all enabled. `tools/build_release.py` runs
+tool shells, and Studio `apex` RPC support compiled in. Studio's USB interface is
+off by default and can be enabled at runtime (see §2). `tools/build_release.py` runs
 `build_g4b.py --shell` and layers `g4b_shell_release.conf` on top, so
 `CONFIG_APEX_G4B_SHELL` is on in the release build exactly as in the debug build.
 `g4b_shell_release.conf` trims only the bench-only bits (`CONFIG_APEX_G4B_KBD_TELEMETRY`,
@@ -232,6 +257,6 @@ One image carries BLE and the custom 2.4 GHz receiver link plus wireless (OTA)
 update, and the hardware switch picks BLE vs 2.4 GHz. `g4b_release_size.conf` drops
 floating-point printf (`CONFIG_PICOLIBC_IO_FLOAT` / `CONFIG_CBPRINTF_FP_SUPPORT`),
 no firmware code formats `%f`/`%g`/`%e`, so the image stays below the `0x63000`
-bootloader self-update staging floor. `--shell` skips the plain-image audit
-(`verify_g4b_plain.py`); release policy is enforced instead by
-`verify_release_config` in `build_release.py`.
+bootloader self-update staging floor. Direct `--shell` builds skip the plain-image
+audit (`verify_g4b_plain.py`); `build_release.py` always runs that full audit for
+release artifacts and enforces shell release policy through `verify_release_config`.

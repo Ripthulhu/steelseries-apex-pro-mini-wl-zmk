@@ -102,8 +102,8 @@ def verify_release_config(artifact_dir: Path) -> None:
         "APEX_G4B_EVIDENCE_USB": "n",
         "APEX_G4B_KBD_CAPTURE": "n",
         "APEX_G4B_KBD_TELEMETRY": "n",
-        "APEX_G4B_LITTLEFS": "n",
-        "APEX_G4B_SLEEP_MS": "3600000",
+        "APEX_G4B_SLEEP_MS": "0",
+        "APEX_G4B_DONGLE_SLEEP": "n",
         "APEX_G4B_STM32_STOP1_IDLE_MS": "0",
         "APEX_G4B_STM32_STOP1_ALLOW_USB": "n",
         "APEX_G4B_UART_EMIT": "n",
@@ -177,7 +177,6 @@ def verify_release_config(artifact_dir: Path) -> None:
         "APEX_G4B_DONGLE_RADIO",
         "APEX_G4B_RADIO_PROBE",
         "APEX_G4B_RADIO_INPUT",
-        "APEX_G4B_DONGLE_SLEEP",
         "APEX_G4B_WIRELESS_UPDATE",
     }
     unexpected = sorted(
@@ -539,6 +538,12 @@ def main() -> int:
     extra_conf = [path.expanduser().resolve() for path in args.extra_conf]
     artifact_dir = build_app(work_root, python, extra_conf)
     verify_release_config(artifact_dir)
+    # Release builds include the shell, so build_g4b.py skips its diagnostic
+    # audit. Always run the full artifact/recovery audit here before packaging.
+    run([python, ROOT / "apex-zmk-g4b" / "verify_g4b_plain.py",
+         "--build-dir", work_root / "build-repo-apex-zmk-g4b-wireless-idle-ab-v2",
+         "--artifact-dir", artifact_dir, "--zephyr-base", upstream / "zephyr",
+         "--expect-stage", "3", "--wireless-idle", "--ab-v2"])
     run([python, ROOT / "installer" / "verify_final_uf2.py",
          artifact_dir / "apex-zmk-g4b.plain.uf2"])
     if args.skip_bootloader:

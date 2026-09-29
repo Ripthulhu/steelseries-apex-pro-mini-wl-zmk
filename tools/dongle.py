@@ -74,12 +74,6 @@ class PairClient:
         if self.status() != expected:
             raise RuntimeError('Pairing read-back fingerprint does not match')
 
-    def clear(self):
-        self.command('clear confirm')
-        self.read_marker(rb'APX_PAIR_CLEARED')
-        if self.status() is not None:
-            raise RuntimeError('Pairing was not cleared')
-
 
 def make_bond():
     body = b'APB1' + secrets.token_bytes(8) + secrets.token_bytes(16)

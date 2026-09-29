@@ -2,8 +2,7 @@
 """Check the actual transport's clock-ACK scheduling guard on a host compiler."""
 import argparse
 from pathlib import Path
-import subprocess
-import tempfile
+from host_test import compile_and_run
 
 
 def main():
@@ -48,13 +47,7 @@ int main(void) {
     return 0;
 }
 '''
-    with tempfile.TemporaryDirectory(prefix='apex-clock-ack-') as folder:
-        path = Path(folder)
-        (path / 'test.c').write_text(harness + function + checks)
-        binary = path / 'test.exe'
-        subprocess.run([args.cc, '-std=c99', '-Wall', '-Wextra', '-Werror',
-                        str(path / 'test.c'), '-o', str(binary)], check=True)
-        subprocess.run([str(binary)], check=True)
+    compile_and_run(harness + function + checks, cc=args.cc)
     print('Clock ACK input scheduling tests passed')
 
 

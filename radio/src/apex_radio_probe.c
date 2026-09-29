@@ -266,7 +266,6 @@ __weak void apex_radio_gamepad_receive(bool enabled, const uint8_t *report) {}
 static atomic_t input_progress, queue_high_water;
 static atomic_t clock_input_advances;
 static atomic_t rx_sequence, input_delivered, duplicate_reports, usb_waits;
-static atomic_t completion_acks, completion_ack_max_us;
 static struct apex_delivery_tx delivery_tx;
 static uint32_t completion_notified;
 static struct {
@@ -283,7 +282,6 @@ __weak int apex_radio_deliver(const struct apex_input_frame *frame) { return -EN
 __weak void apex_radio_delivery_status(struct apex_delivery_ack *ack) { memset(ack, 0, sizeof(*ack)); }
 __weak uint32_t apex_radio_completed(uint32_t *completed_at) { *completed_at = 0; return 0; }
 __weak void apex_radio_release(void) {}
-__weak uint8_t apex_radio_host_leds(void) { return 0; }
 __weak void apex_radio_update_leds(uint8_t leds) { ARG_UNUSED(leds); }
 
 int apex_radio_queue_report(uint8_t type, const uint8_t *data, size_t length)
@@ -723,8 +721,23 @@ static int radio_stop(void)
     return 0;
 }
 
+static bool radio_rx_needed(void)
+{
+#if KEYBOARD_EVENT_RX
+    /* The receiver only transmits solicited replies. Keep discovery and every
+     * outstanding exchange listening; after a validated reply the keyboard
+     * can stop RX until its next TX. TX completion rearms RX in the ISR.
+     * ponytail: retain HFCLK/TIMER2 for the existing hop clock; releasing them
+     * needs a separately verified low-frequency timing scheme. */
+    if (local_role == APEX_KEYBOARD && atomic_get(&hop_live) &&
+        !atomic_get(&reply_pending)) return false;
+#endif
+    return true;
+}
+
 static void radio_receive(void)
 {
+    if (!radio_rx_needed()) return;
 #if EVENT_RX
     atomic_set(&rx_irq_pending, 0);
 #endif
@@ -1376,8 +1389,16 @@ transmit:
 #endif
         }
 wait_next:
+#if KEYBOARD_EVENT_RX
+        /* A deferred TX may have rearmed RX before its caller cleared
+         * reply_pending. Close that window too, without changing retries. */
+        if (!radio_rx_needed()) {
+            rc = radio_stop();
+            if (rc) goto failed;
+        }
+#endif
 #if INPUT_ENABLED
-        if (receiving && !NRF_RADIO->EVENTS_END) {
+        if (!receiving || !NRF_RADIO->EVENTS_END) {
             input_prepare_next();
             ack_prepare_next();
         }
@@ -1516,8 +1537,6 @@ int apex_radio_probe_status(const struct shell *sh, size_t argc, char **argv)
     shell_print(sh, "QUEUE_ACK buckets=%u,%u,%u,%u,%u,%u",
                 latency.buckets[0], latency.buckets[1], latency.buckets[2],
                 latency.buckets[3], latency.buckets[4], latency.buckets[5]);
-    shell_print(sh, "ACK completion_tx=%ld completion_to_tx_max_us=%ld",
-                (long)atomic_get(&completion_acks), (long)atomic_get(&completion_ack_max_us));
     shell_print(sh, "AES hardware_blocks=%lu software_fallback=%lu",
                 (unsigned long)apex_aes_blocks(), (unsigned long)apex_aes_fallbacks());
 #endif

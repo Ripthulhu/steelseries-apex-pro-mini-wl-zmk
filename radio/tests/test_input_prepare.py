@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Test the actual input preparation helpers with a counted encoder."""
 from pathlib import Path
-import subprocess
-import tempfile
+from host_test import compile_and_run
 
 root = Path(__file__).resolve().parents[1]
 source = (root / 'src/apex_radio_probe.c').read_text()
@@ -81,11 +80,7 @@ int main(void) {
     return 0;
 }
 '''
-with tempfile.TemporaryDirectory(prefix='apex-input-prepare-') as folder:
-    path = Path(folder)
-    (path / 'test.c').write_text(harness + declarations + functions + checks)
-    subprocess.run(['cc', '-std=c99', '-Wall', '-Wextra', '-Werror', '-fsanitize=undefined',
-                    '-I', str(root / 'include'), str(path / 'test.c'),
-                    str(root / 'src/apex_input.c'), '-o', str(path / 'test')], check=True)
-    subprocess.run([str(path / 'test')], check=True)
+compile_and_run(harness + declarations + functions + checks,
+                flags=('-fsanitize=undefined', '-I', str(root / 'include')),
+                sources=(root / 'src/apex_input.c',))
 print('Input preparation tests passed')

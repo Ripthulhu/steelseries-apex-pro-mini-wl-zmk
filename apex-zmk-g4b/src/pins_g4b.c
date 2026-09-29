@@ -30,6 +30,8 @@
 #define G4B_GPIOTE_CONFIG_ATTN 0x00011801u
 #define G4B_GPIOTE_ATTN_CH     1u
 #define G4B_GPIOTE_IRQ_PRIO    1u
+#define G4B_ATTN_SENSE_MASK GPIO_PIN_CNF_SENSE_Msk
+#define G4B_ATTN_SENSE_HIGH (GPIO_PIN_CNF_SENSE_High << GPIO_PIN_CNF_SENSE_Pos)
 
 static K_SEM_DEFINE(g4b_attn_sem, 0, 1);
 
@@ -41,8 +43,11 @@ static void g4b_gpiote_attn_isr(const void *arg)
 {
     ARG_UNUSED(arg);
 
-    if (NRF_GPIOTE->EVENTS_IN[G4B_GPIOTE_ATTN_CH] != 0u) {
+    if (NRF_GPIOTE->EVENTS_IN[G4B_GPIOTE_ATTN_CH] != 0u ||
+        NRF_GPIOTE->EVENTS_PORT != 0u) {
         NRF_GPIOTE->EVENTS_IN[G4B_GPIOTE_ATTN_CH] = 0u;
+        NRF_GPIOTE->EVENTS_PORT = 0u;
+        (void)NRF_GPIOTE->EVENTS_PORT;
         (void)NRF_GPIOTE->EVENTS_IN[G4B_GPIOTE_ATTN_CH]; /* flush posted write */
         g4b_attn_isr_fires_ct++;
         k_sem_give(&g4b_attn_sem);
@@ -66,7 +71,47 @@ void g4b_gpiote_attn_configure(void)
 
 int g4b_attn_wait(uint32_t timeout_ms)
 {
-    return k_sem_take(&g4b_attn_sem, K_MSEC(timeout_ms));
+    /* IN channels need HFCLK even with their interrupts masked. Park both
+     * while the scanner thread waits, and use the low-power PORT event. READY
+     * stays high until a transfer starts, so wait_ready() can use its level
+     * after channel 0 is restored. No transfer runs while this thread waits.
+     */
+    unsigned int key = irq_lock();
+    uint32_t ready_cfg = NRF_GPIOTE->CONFIG[0];
+    uint32_t attn_cfg = NRF_P0->PIN_CNF[G4B_P0_ATTN];
+
+    NRF_GPIOTE->INTENCLR = BIT(G4B_GPIOTE_ATTN_CH) | GPIOTE_INTENCLR_PORT_Msk;
+    NRF_GPIOTE->CONFIG[0] = 0u;
+    NRF_GPIOTE->CONFIG[G4B_GPIOTE_ATTN_CH] = 0u;
+    NRF_P0->PIN_CNF[G4B_P0_ATTN] = attn_cfg & ~G4B_ATTN_SENSE_MASK;
+    NRF_P0->LATCH = BIT(G4B_P0_ATTN);
+    __DSB();
+    NRF_GPIOTE->EVENTS_PORT = 0u;
+    NRF_P0->PIN_CNF[G4B_P0_ATTN] =
+        (attn_cfg & ~G4B_ATTN_SENSE_MASK) | G4B_ATTN_SENSE_HIGH;
+    NRF_GPIOTE->INTENSET = GPIOTE_INTENSET_PORT_Msk;
+    __DSB();
+    /* An already-high ATTN may have no fresh edge. Recheck after arming; an
+     * edge arriving after this check is retained by the ISR/semaphore.
+     */
+    bool pending = (NRF_P0->IN & BIT(G4B_P0_ATTN)) != 0u ||
+                   NRF_GPIOTE->EVENTS_PORT != 0u;
+    irq_unlock(key);
+    int result = pending ? 0 : k_sem_take(&g4b_attn_sem, K_MSEC(timeout_ms));
+
+    key = irq_lock();
+    NRF_GPIOTE->INTENCLR = GPIOTE_INTENCLR_PORT_Msk;
+    NRF_P0->PIN_CNF[G4B_P0_ATTN] = attn_cfg & ~G4B_ATTN_SENSE_MASK;
+    __DSB();
+    NRF_GPIOTE->EVENTS_PORT = 0u;
+    (void)NRF_GPIOTE->EVENTS_PORT;
+    NRF_GPIOTE->CONFIG[0] = ready_cfg;
+    NRF_GPIOTE->CONFIG[G4B_GPIOTE_ATTN_CH] = G4B_GPIOTE_CONFIG_ATTN;
+    NRF_P0->PIN_CNF[G4B_P0_ATTN] = attn_cfg;
+    NRF_GPIOTE->INTENSET = BIT(G4B_GPIOTE_ATTN_CH);
+    __DSB();
+    irq_unlock(key);
+    return result;
 }
 
 #if (CONFIG_APEX_G4B_STM32_STOP1_IDLE_MS > 0) || \

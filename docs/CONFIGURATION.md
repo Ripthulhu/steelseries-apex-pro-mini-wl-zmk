@@ -39,11 +39,11 @@ enables and checks A/B recovery. The finished bundle includes
 | Setting | Release value | Meaning |
 |---|---:|---|
 | `CONFIG_ZMK_KEYBOARD_NAME` | `"Apex Pro Mini WL"` | USB and Bluetooth device name |
-| `CONFIG_APEX_G4B_RGB_IDLE_MS` | `30000` | Begin fading RGB after this much Bluetooth idle time; the rail turns off about 10 seconds later, and `0` disables the timeout |
+| `CONFIG_APEX_G4B_RGB_IDLE_MS` | `30000` | Begin fading RGB after this much wireless idle time; the rail turns off about 10 seconds later, and `0` disables the timeout |
 | `CONFIG_ZMK_RGB_UNDERGLOW_BRT_MAX` | `100` | Maximum RGB brightness in percent |
 | `CONFIG_APEX_G4B_RAPID_TRIGGER` | `3` | Rapid-trigger travel in tenths of a millimetre; `0` disables it |
-| `CONFIG_APEX_G4B_STM32_IDLE_SCAN_PERIOD_MS` | `50` | Scanner period after five idle seconds on Bluetooth |
-| `CONFIG_APEX_G4B_STM32_LONG_IDLE_SCAN_PERIOD_MS` | `255` | Scanner period after one idle minute on Bluetooth |
+| `CONFIG_APEX_G4B_STM32_IDLE_SCAN_PERIOD_MS` | `50` | Scanner period after five idle seconds in either wireless mode |
+| `CONFIG_APEX_G4B_STM32_LONG_IDLE_SCAN_PERIOD_MS` | `100` | Scanner period after one idle minute in either wireless mode |
 | `CONFIG_APEX_G4B_STM32_LONG_IDLE_AFTER_MS` | `60000` | Time before the second scanner idle tier |
 | `CONFIG_ZMK_BATTERY_REPORT_INTERVAL` | `60` | Seconds between battery updates |
 | `CONFIG_APEX_G4B_CHARGE_STOP_PCT` | `80` | Stop-charging threshold |
@@ -51,8 +51,10 @@ enables and checks A/B recovery. The finished bundle includes
 | `CONFIG_APEX_G4B_GAMEPAD` | `y` | W/A/S/D analog gamepad over USB, or through the dongle when the switch selects 2.4 GHz |
 
 The scanner period is stored in one byte, so 255 ms is its limit. These slower
-periods apply only on battery in Bluetooth mode. USB keeps the scanner at full
-speed, and a key immediately returns it to full speed.
+periods apply only without VBUS in Bluetooth or dongle mode. USB power keeps the
+scanner at full speed. A detected key returns it to full speed, but detection
+can take one idle scan period. System OFF is disabled in releases to avoid
+rebooting and reconnecting after idle; the CPU still idles between interrupts.
 
 ## Release logging
 

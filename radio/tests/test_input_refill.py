@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Check that new input wakes an idle transaction without interrupting a reply."""
 from pathlib import Path
-import subprocess
-import tempfile
+from host_test import compile_and_run
 
 root = Path(__file__).resolve().parents[1]
 source = (root / 'src/apex_radio_probe.c').read_text()
@@ -49,11 +48,7 @@ int main(void) {
     assert(!apex_radio_queue_report(1,keys,8) && wakes==1);
 }
 '''
-with tempfile.TemporaryDirectory(prefix='apex-refill-') as folder:
-    path = Path(folder)
-    (path / 'test.c').write_text(harness + function + checks)
-    subprocess.run(['cc', '-std=c99', '-Wall', '-Wextra', '-Werror', '-fsanitize=undefined',
-                    '-I', str(root / 'include'), str(path / 'test.c'),
-                    str(root / 'src/apex_input.c'), '-o', str(path / 'test')], check=True)
-    subprocess.run([str(path / 'test')], check=True)
+compile_and_run(harness + function + checks,
+                flags=('-fsanitize=undefined', '-I', str(root / 'include')),
+                sources=(root / 'src/apex_input.c',))
 print('Input refill tests passed')

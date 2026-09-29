@@ -29,6 +29,7 @@
 #include <zephyr/init.h>
 #include <zephyr/sys/util.h>
 #include <zephyr/sys/crc.h>
+#include <zephyr/sys/printk.h>
 
 #include "spinor_g4b.h"
 #include "ab_rollback_g4b.h"
@@ -336,41 +337,20 @@ SYS_INIT(g4b_ab_boot_pending_init, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY
 #if IS_ENABLED(CONFIG_APEX_G4B_UART_EVIDENCE) && \
     (IS_ENABLED(CONFIG_APEX_G4B_UART_EMIT) || \
      IS_ENABLED(CONFIG_APEX_G4B_EVIDENCE_USB))
-static uint32_t ab_puthex(uint8_t *line, uint32_t n, uint32_t v)
-{
-    static const char hexd[] = "0123456789abcdef";
-
-    for (int shift = 28; shift >= 0; shift -= 4) {
-        line[n++] = (uint8_t)hexd[(v >> shift) & 0xFu];
-    }
-    return n;
-}
-
-static uint32_t ab_puttag(uint8_t *line, uint32_t n, const char *tag)
-{
-    while (*tag != '\0') {
-        line[n++] = (uint8_t)*tag++;
-    }
-    return n;
-}
-
 static void g4b_ab_status_thread(void *a, void *b, void *c)
 {
     uint8_t buf[256];
     struct ab_header h;
     uint32_t fails = 0u;
     bool armed = false;
-    /* The full status line is a fixed 71 bytes ("APXAB fails=" + 8 + " armed=" +
-     * 1 + " blen=" + 8 + " bcrc=" + 8 + " thr=" + 8 + CRLF). 80 gives headroom;
-     * the appends below are unbounded, so this MUST cover the worst case. */
-    uint8_t line[80];
-    uint32_t n = 0u;
+    char line[80];
+    int n;
 
     ARG_UNUSED(a);
     ARG_UNUSED(b);
     ARG_UNUSED(c);
 
-    k_msleep(4500); /* after the coredump/lfs reporters, USB CDC up */
+    k_msleep(4500); /* after the coredump reporter, USB CDC up */
 
     /* Count 0x00 bytes across the tally sector = unhealthy boots since the last
      * HEALTHY erase. */
@@ -396,30 +376,21 @@ static void g4b_ab_status_thread(void *a, void *b, void *c)
         memset(&h, 0, sizeof(h));
     }
 
-    n = ab_puttag(line, 0u, "APXAB fails=");
-    n = ab_puthex(line, n, fails);
-    n = ab_puttag(line, n, " armed=");
-    line[n++] = armed ? '1' : '0';
-    n = ab_puttag(line, n, " blen=");
-    n = ab_puthex(line, n, h.b_len);
-    n = ab_puttag(line, n, " bcrc=");
-    n = ab_puthex(line, n, h.b_crc32);
-    n = ab_puttag(line, n, " thr=");
-    n = ab_puthex(line, n, armed ? h.fail_thresh : 0u);
-    line[n++] = '\r';
-    line[n++] = '\n';
-    g4b_evidence_emit_text(line, n);
+    n = snprintk(line, sizeof(line), "APXAB fails=%08x armed=%u blen=%08x bcrc=%08x thr=%08x\r\n",
+                fails, (unsigned int)armed, h.b_len, h.b_crc32, armed ? h.fail_thresh : 0u);
+    if (n > 0) {
+        g4b_evidence_emit_text((const uint8_t *)line, MIN((size_t)n, sizeof(line) - 1u));
+    }
 
     /* Re-emit the ATTN interrupt count every few seconds. A rising count while
      * typing shows that queued key reports wake the Nordic scan thread instead
      * of the semaphore timeout fallback. */
     for (;;) {
         k_msleep(3000);
-        n = ab_puttag(line, 0u, "APXISR fires=");
-        n = ab_puthex(line, n, g4b_attn_isr_fires());
-        line[n++] = '\r';
-        line[n++] = '\n';
-        g4b_evidence_emit_text(line, n);
+        n = snprintk(line, sizeof(line), "APXISR fires=%08x\r\n", g4b_attn_isr_fires());
+        if (n > 0) {
+            g4b_evidence_emit_text((const uint8_t *)line, MIN((size_t)n, sizeof(line) - 1u));
+        }
     }
 }
 

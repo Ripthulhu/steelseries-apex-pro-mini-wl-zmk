@@ -6,7 +6,7 @@
 # to the charger through src/twi_g4b.c, which drives legacy TWI1 by direct
 # register access in the same style as the SPIM link and the RGB controller.
 # That is deliberate - this build forces CONFIG_I2C, CONFIG_SPI, CONFIG_GPIO and
-# CONFIG_PINCTRL off, and verify_g4b.py fails the build if any of them reappear.
+# CONFIG_PINCTRL off.
 # Pulling in Zephyr's I2C stack just to read one register would undo that.
 
 description: BQ25895 charger used as a battery state-of-charge sensor

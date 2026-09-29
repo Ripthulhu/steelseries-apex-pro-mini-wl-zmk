@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Exercise prepared replies against changing queue, LED and session state."""
 from pathlib import Path
-import subprocess
-import tempfile
+from host_test import compile_and_run
 
 root = Path(__file__).resolve().parents[1]
 source = (root / 'src/apex_radio_probe.c').read_text()
@@ -81,12 +80,7 @@ int main(void) {
     connection.state = 5; fail_encode = 1; ack_prepare_next(); assert(!prepared_ack.length);
 }
 '''
-with tempfile.TemporaryDirectory(prefix='apex-ack-prepare-') as folder:
-    path = Path(folder)
-    (path / 'test.c').write_text(harness + code + checks)
-    subprocess.run(['cc', '-std=c99', '-Wall', '-Wextra', '-Werror',
-                    '-fsanitize=undefined', '-I', str(root / 'include'),
-                    str(path / 'test.c'), str(root / 'src/apex_delivery.c'),
-                    str(root / 'src/apex_input.c'), '-o', str(path / 'test')], check=True)
-    subprocess.run([str(path / 'test')], check=True)
+compile_and_run(harness + code + checks,
+                flags=('-fsanitize=undefined', '-I', str(root / 'include')),
+                sources=(root / 'src/apex_delivery.c', root / 'src/apex_input.c'))
 print('Prepared ACK tests passed')

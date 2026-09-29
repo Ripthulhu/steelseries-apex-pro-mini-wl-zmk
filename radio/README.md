@@ -350,8 +350,7 @@ or interference tests. They fall well short of the 1000 reports/s target.
 The older single-report timing counters below were collected before input
 format 2. `SEND_ACK` tracks only one report and cannot represent all reports
 with delivery pipelined. `COMPLETE_ACK` was removed because unsolicited
-completion replies no longer exist. `ACK completion_tx` is a legacy field that
-doesn't advance. Use `QUEUE_ACK` and USB
+completion replies no longer exist. Use `QUEUE_ACK` and USB
 completion counts for the current pipeline until per-report timing is updated.
 
 `SEND_ACK` measures from entering the first successful input send call to

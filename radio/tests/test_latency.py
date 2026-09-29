@@ -2,8 +2,7 @@
 """Check timing bucket boundaries and counter saturation with a host compiler."""
 import argparse
 from pathlib import Path
-import subprocess
-import tempfile
+from host_test import compile_and_run
 
 
 def main():
@@ -33,14 +32,8 @@ int main(void) {
     return 0;
 }
 '''
-    with tempfile.TemporaryDirectory(prefix='apex-latency-') as folder:
-        path = Path(folder)
-        (path / 'test.c').write_text(source)
-        binary = path / 'test.exe'
-        subprocess.run([args.cc, '-std=c99', '-Wall', '-Wextra', '-Werror',
-                        '-I', str(Path(__file__).resolve().parents[1] / 'include'),
-                        str(path / 'test.c'), '-o', str(binary)], check=True)
-        subprocess.run([str(binary)], check=True)
+    compile_and_run(source, cc=args.cc,
+                    flags=('-I', str(Path(__file__).resolve().parents[1] / 'include')))
     print('Latency histogram tests passed')
 
 
